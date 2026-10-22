@@ -1,0 +1,30 @@
+{
+  "name": "@talk2myagent/a2a-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local console for opening your dsh agent to A2A visitors: setup wizard + monitoring",
+  "type": "module",
+  "bin": {
+    "a2a-host": "dist/cli.js"
+  },
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "build:web": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev:web": "vite"
+  },
+  "dependencies": {
+    "yaml": "^2.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.10"
+  }
+}
