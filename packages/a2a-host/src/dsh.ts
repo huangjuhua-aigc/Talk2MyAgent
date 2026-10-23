@@ -55,6 +55,10 @@ export class DshRunner {
 
   constructor(private readonly agentId: string) {}
 
+  /** The address this agent was last started on; internal calls must use it
+   *  (a concretely-bound server is NOT reachable over loopback). */
+  lastBind: { host: string; port: number } | undefined
+
   private pidFile(): string {
     return agentPidPath(this.agentId)
   }
@@ -85,15 +89,19 @@ export class DshRunner {
    */
   start(profile: string, firstTime: boolean, patchPath: string, bind: { host: string; port: number }): boolean {
     if (this.running) return false
+    this.lastBind = bind
     const { command, args } = launchCommand(profile, firstTime, patchPath, bind)
     this.logs.push(`$ ${command} ${args.join(' ')}`)
-    const child = spawn(command, args, { shell: process.platform === 'win32' })
-    child.stdout?.on('data', (chunk: Buffer) => {
-      for (const line of chunk.toString().split('\n')) if (line.length > 0) this.logs.push(line)
+    // Fully detached: killing the console (or its process tree) must NOT take
+    // the online agent down — "close the console, the agent stays" is the
+    // product's promise. The price is no live stdout here; dsh writes its own
+    // logs under ~/.dsh/logs/.
+    const child = spawn(command, args, {
+      shell: process.platform === 'win32',
+      detached: true,
+      stdio: 'ignore',
     })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      for (const line of chunk.toString().split('\n')) if (line.length > 0) this.logs.push(line)
-    })
+    child.unref()
     child.on('close', (code) => {
       this.logs.push(`(dsh exited with code ${code ?? 'unknown'})`)
       this.child = undefined

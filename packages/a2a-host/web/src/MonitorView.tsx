@@ -60,6 +60,115 @@ function AgentOverview(props: { detail: AgentDetail }): React.JSX.Element {
   )
 }
 
+/** The agent-level host briefing, editable in place, with draft adoption. */
+function HandoffCard(props: { agentId: string }): React.JSX.Element {
+  const [text, setText] = useState<string | undefined>(undefined)
+  const [draft, setDraft] = useState<{ exists: boolean; text: string } | undefined>(undefined)
+  const [showDraft, setShowDraft] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [scheduling, setScheduling] = useState<string | undefined>(undefined)
+
+  const refresh = (): void => {
+    void api.handoff(props.agentId).then(result => { setText(result.text) })
+    void api.handoffDraft(props.agentId).then(setDraft)
+  }
+  useEffect(() => {
+    setText(undefined)
+    setDraft(undefined)
+    refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.agentId])
+
+  if (text === undefined) return <></>
+  return (
+    <div className="card">
+      <h2>主人简报</h2>
+      <p className="hint">
+        每个新访客会话开启时自动注入给模型（进行中的会话不受影响）。推荐写：最近在做什么、关键决定、待办。
+      </p>
+      {draft !== undefined && draft.exists ? (
+        <div className="callout" style={{ marginBottom: 10 }}>
+          <div className="row">
+            <strong>有一份新草稿待审核</strong>
+            <span className="grow" />
+            <button className="quiet" onClick={() => { setShowDraft(value => !value) }}>
+              {showDraft ? '收起' : '预览'}
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => {
+                setBusy(true)
+                void api.adoptDraft(props.agentId).then(() => {
+                  setBusy(false)
+                  refresh()
+                })
+              }}
+            >
+              采纳为正式简报
+            </button>
+            <button
+              className="quiet"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true)
+                void api.dismissDraft(props.agentId).then(() => {
+                  setBusy(false)
+                  setDraft({ exists: false, text: '' })
+                })
+              }}
+            >
+              忽略
+            </button>
+          </div>
+          {showDraft ? <pre className="code" style={{ marginTop: 8 }}>{draft.text}</pre> : null}
+        </div>
+      ) : null}
+      <textarea
+        rows={6}
+        value={text}
+        placeholder="例如：&#10;最近在做 dsh-a2a 升级…&#10;关键决定：出站用 skill…&#10;待办：发版 0.3.0"
+        onChange={event => { setText(event.target.value) }}
+      />
+      <div className="row" style={{ marginTop: 8 }}>
+        <button
+          className={saved ? 'primary' : undefined}
+          disabled={busy}
+          onClick={() => {
+            setBusy(true)
+            void api.saveHandoff(props.agentId, text).then(() => {
+              setBusy(false)
+              setSaved(true)
+              setTimeout(() => { setSaved(false) }, 2500)
+            })
+          }}
+        >
+          {saved ? '已保存 ✓' : '保存简报'}
+        </button>
+        <span className="small muted">文件位置：&lt;工作区&gt;/.hop/handoff.md</span>
+      </div>
+      <div className="row" style={{ marginTop: 12, borderTop: '1px solid var(--line)', paddingTop: 10 }}>
+        <strong className="small">自动维护</strong>
+        <span className="small muted">让本 agent 每小时自动蒸馏各本地 agent（claude code / codex / zcode / kimi / workbuddy）中与本项目相关的会话，产出草稿待您审核（只读该项目范围，不写正式简报）。</span>
+        <span className="grow" />
+        <button
+          disabled={busy}
+          title="需要在线 agent 正在运行"
+          onClick={() => {
+            setScheduling('正在指示 agent 建立定时任务（最长两分钟）…')
+            void api.scheduleBriefing(props.agentId).then(result => {
+              setScheduling(result.ok ? `已建立：${result.reply.slice(0, 120)}` : `失败：${result.reply.slice(0, 160)}`)
+            })
+          }}
+        >
+          开启定时简报
+        </button>
+      </div>
+      {scheduling !== undefined ? <p className="field-note">{scheduling}</p> : null}
+    </div>
+  )
+}
+
 export function MonitorView(props: {
   agentId: string
   onEdit: () => void
@@ -102,6 +211,7 @@ export function MonitorView(props: {
   return (
     <>
       {detail !== undefined ? <AgentOverview detail={detail} /> : <p className="muted">加载中…</p>}
+      <HandoffCard agentId={props.agentId} />
 
       <div className="card">
         <div className="row">

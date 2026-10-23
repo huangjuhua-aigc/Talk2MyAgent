@@ -81,7 +81,7 @@ if (command === 'ui' || command === 'wizard') {
     const stopped = runner.stop()
     console.log(stopped ? 'online agent stopped' : 'no running online agent found')
   } else {
-    const result = await fetchSnapshot(agent.config.network.port, agent.config.adminToken)
+    const result = await fetchSnapshot(`http://127.0.0.1:${String(agent.config.network.port)}`, agent.config.adminToken)
     console.log(JSON.stringify(result, null, 2))
   }
 } else {

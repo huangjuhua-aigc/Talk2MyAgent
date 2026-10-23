@@ -53,6 +53,12 @@ export const api = {
   stop: (id: string) => post<{ stopped: boolean }>(`/api/agents/${encodeURIComponent(id)}/stop`),
   status: (id: string) => get<{ running: boolean; logs: string[] }>(`/api/agents/${encodeURIComponent(id)}/status`),
   monitor: (id: string) => get<{ ok: true; snapshot: MonitorSnapshot } | { ok: false; reason: string }>(`/api/agents/${encodeURIComponent(id)}/monitor`),
+  handoff: (id: string) => get<{ text: string }>(`/api/agents/${encodeURIComponent(id)}/handoff`),
+  saveHandoff: (id: string, text: string) => post<{ saved: boolean; note: string }>(`/api/agents/${encodeURIComponent(id)}/handoff`, { text }, 'PUT'),
+  handoffDraft: (id: string) => get<{ exists: boolean; text: string }>(`/api/agents/${encodeURIComponent(id)}/handoff-draft`),
+  adoptDraft: (id: string) => post<{ adopted: boolean }>(`/api/agents/${encodeURIComponent(id)}/handoff-draft`, undefined, 'POST'),
+  dismissDraft: (id: string) => post<{ dismissed: boolean }>(`/api/agents/${encodeURIComponent(id)}/handoff-draft`, undefined, 'DELETE'),
+  scheduleBriefing: (id: string) => post<{ ok: boolean; reply: string }>(`/api/agents/${encodeURIComponent(id)}/briefing-schedule`, {}),
   pickDirectory: () => post<{ ok: true; path: string } | { ok: false; reason: string }>('/api/pick-directory'),
   ensurePlugin: () => post<{ ok: boolean; output: string }>('/api/ensure-plugin'),
 }

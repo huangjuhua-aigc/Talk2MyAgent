@@ -852,8 +852,7 @@ function ReviewScreen(props: {
       ) : null}
       {phase === 'started' ? (
         <>
-          <p className="small muted" style={{ marginTop: 12 }}>启动日志（每 2 秒刷新）：</p>
-          <pre className="code">{logs.slice(-24).join('\n') || '（等待输出…）'}</pre>
+          <p className="small muted" style={{ marginTop: 12 }}>启动后可用「进入控制台」确认运行状态；完整日志在 ~/.dsh/logs/ 下。</p>
           {manual !== undefined ? <p className="small muted">若自动启动失败，可手动运行：<span className="mono">{manual}</span></p> : null}
         </>
       ) : null}

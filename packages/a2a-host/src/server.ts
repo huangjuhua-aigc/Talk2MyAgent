@@ -55,6 +55,23 @@ const runnerFor = (id: string): DshRunner => {
   return runner
 }
 
+/**
+ * The address an agent is (or would be) reachable on. Prefers the runner's
+ * remembered bind; after a console restart that memory is gone, so it is
+ * re-derived from the network interfaces and cached back.
+ */
+async function resolveRunnerBind(runner: DshRunner, record: AgentRecord): Promise<{ host: string; port: number }> {
+  if (runner.lastBind !== undefined) return runner.lastBind
+  const detected = await detect(record.profile)
+  const configured = record.config.network.host
+  const available = ['127.0.0.1', ...detected.lanIps]
+  const host = configured !== undefined && /^\d{1,3}(\.\d{1,3}){3}$/.test(configured) && available.includes(configured)
+    ? configured
+    : detected.lanIps[0] ?? '127.0.0.1'
+  runner.lastBind = { host, port: record.config.network.port }
+  return runner.lastBind
+}
+
 /** Read one JSON request body. */
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
@@ -92,7 +109,7 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
 
 /** `[/api/agents/<id>](/sub...)` → [id, subresource]. */
 function parseAgentPath(pathname: string): { id: string; sub: string } | undefined {
-  const match = /^\/api\/agents\/([^/]+)(?:\/(\w+))?/.exec(pathname)
+  const match = /^\/api\/agents\/([^/]+)(?:\/([\w-]+))?/.exec(pathname)
   if (match === null) return undefined
   return { id: decodeURIComponent(match[1] ?? ''), sub: match[2] ?? '' }
 }
@@ -225,16 +242,34 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     for (const pkg of extraPackages(record.config)) {
       await installPlugin(record.profile, pkg)
     }
-    // Bind one concrete address: the configured host when it is an IP
-    // literal (a domain cannot be bound), else the detected LAN IP, else
-    // loopback. Loopback-bound agents are invisible to visitors.
+    // Bind one concrete address. A configured IP literal wins, but networks
+    // change (different Wi-Fi, DHCP) — an address no longer on any interface
+    // would kill the boot with EADDRNOTAVAIL, so fall back to the detected
+    // LAN IP and say so in the logs.
     const configuredHost = record.config.network.host
-    const bindHost = configuredHost !== undefined && /^\d{1,3}(\.\d{1,3}){3}$/.test(configuredHost)
-      ? configuredHost
-      : detected.lanIps[0] ?? '127.0.0.1'
+    const available = ['127.0.0.1', ...detected.lanIps]
+    let bindHost: string
+    let fallbackNote: string | undefined
+    if (configuredHost !== undefined && /^\d{1,3}(\.\d{1,3}){3}$/.test(configuredHost)
+      && available.includes(configuredHost)) {
+      bindHost = configuredHost
+    } else {
+      bindHost = detected.lanIps[0] ?? '127.0.0.1'
+      if (configuredHost !== undefined && configuredHost !== bindHost) {
+        fallbackNote = `配置的地址 ${configuredHost} 已不在本机网卡上（换了网络？），已改绑 ${bindHost}`
+      }
+    }
     const bind = { host: bindHost, port: record.config.network.port }
     const firstTime = !detected.profile.exists
     const started = runner.start(record.profile, firstTime, agentPatchPath(id), bind)
+    if (fallbackNote !== undefined) {
+      json(res, 200, {
+        started,
+        fallback: fallbackNote,
+        manual: runner.manualCommand(record.profile, firstTime, agentPatchPath(id), bind),
+      })
+      return
+    }
     json(res, 200, { started, manual: runner.manualCommand(record.profile, firstTime, agentPatchPath(id), bind) })
     return
   }
@@ -249,8 +284,120 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     return
   }
 
+  if (sub === 'briefing-schedule' && req.method === 'POST') {
+    // Speak to our own agent as the owner: it creates the recurring schedule
+    // task (dsh-native, survives restarts) and runs it once right away.
+    const { briefingBootstrapPrompt } = await import('./briefing.ts')
+    const { randomUUID } = await import('node:crypto')
+    const body = await readBody(req) as { root?: string }
+    const root = body.root ?? record.config.isolation.workspaceRoot
+    const bind = await resolveRunnerBind(runner, record)
+    try {
+      const response = await fetch(`http://${bind.host}:${bind.port}/a2a`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${record.config.adminToken}`,
+          'a2a-version': '1.0',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: randomUUID(),
+          method: 'SendMessage',
+          params: {
+            message: {
+              messageId: randomUUID(),
+              role: 'ROLE_USER',
+              parts: [{ text: briefingBootstrapPrompt(root) }],
+            },
+          },
+        }),
+        signal: AbortSignal.timeout(120_000),
+      })
+      const envelope = await response.json() as {
+        result?: { task?: { status?: { state?: string }; artifacts?: { parts?: { text?: string }[] }[] } }
+        error?: { message?: string }
+      }
+      const reply = envelope.result?.task?.artifacts
+        ?.flatMap(artifact => artifact.parts ?? [])
+        .map(part => part.text ?? '')
+        .join('\n') ?? ''
+      json(res, 200, {
+        ok: response.ok && envelope.error === undefined,
+        state: envelope.result?.task?.status?.state,
+        reply: reply || envelope.error?.message || '(no reply)',
+      })
+    } catch (error: unknown) {
+      json(res, 200, { ok: false, reply: `cannot reach the agent (${String(error)})` })
+    }
+    return
+  }
+
+  if (sub === 'handoff-draft' && req.method === 'GET') {
+    const { readFile } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    try {
+      const text = await readFile(join(record.config.isolation.workspaceRoot, '.hop', 'handoff.draft.md'), 'utf8')
+      json(res, 200, { exists: true, text })
+    } catch {
+      json(res, 200, { exists: false, text: '' })
+    }
+    return
+  }
+
+  if (sub === 'handoff-draft' && req.method === 'DELETE') {
+    const { rm } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    await rm(join(record.config.isolation.workspaceRoot, '.hop', 'handoff.draft.md'), { force: true })
+    json(res, 200, { dismissed: true })
+    return
+  }
+
+  if (sub === 'handoff-draft' && req.method === 'POST') {
+    // Adopt: promote the draft to the live briefing.
+    const { readFile, writeFile, rm } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    const draft = join(record.config.isolation.workspaceRoot, '.hop', 'handoff.draft.md')
+    const live = join(record.config.isolation.workspaceRoot, '.hop', 'handoff.md')
+    try {
+      const text = await readFile(draft, 'utf8')
+      await writeFile(live, text, 'utf8')
+      await rm(draft, { force: true })
+      json(res, 200, { adopted: true, text })
+    } catch {
+      json(res, 200, { adopted: false, error: 'no draft to adopt' })
+    }
+    return
+  }
+
+  if (sub === 'handoff' && req.method === 'GET') {
+    // The briefing is agent-level data at the workspace root, shared by every
+    // visitor; the console edits it directly so no hooks are required.
+    const { readFile } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    try {
+      const text = await readFile(join(record.config.isolation.workspaceRoot, '.hop', 'handoff.md'), 'utf8')
+      json(res, 200, { text })
+    } catch {
+      json(res, 200, { text: '' })
+    }
+    return
+  }
+
+  if (sub === 'handoff' && req.method === 'PUT') {
+    const { writeFile, mkdir } = await import('node:fs/promises')
+    const { join, dirname } = await import('node:path')
+    const body = await readBody(req) as { text?: string }
+    const path = join(record.config.isolation.workspaceRoot, '.hop', 'handoff.md')
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, body.text ?? '', 'utf8')
+    json(res, 200, { saved: true, note: '每个新访客会话开启时自动注入；已在进行中的会话不受影响' })
+    return
+  }
+
   if (sub === 'monitor' && req.method === 'GET') {
-    const result = await fetchSnapshot(record.config.network.port, record.config.adminToken)
+    const bind = await resolveRunnerBind(runner, record)
+    const result = await fetchSnapshot(`http://${bind.host}:${bind.port}`, record.config.adminToken)
     json(res, 200, result)
     return
   }

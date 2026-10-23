@@ -9,13 +9,13 @@ import type { MonitorSnapshot } from './types.ts'
 
 /**
  * Fetch the monitoring snapshot from one agent's resident dsh instance.
- * @param port - the port that agent's web server listens on.
+ * @param baseUrl - the agent's actual base URL (its bound host, not loopback).
  * @param token - that agent's admin token (kept in its saved record).
  * @returns the snapshot, or a short reason it is unavailable.
  */
-export async function fetchSnapshot(port: number, token: string): Promise<{ ok: true; snapshot: MonitorSnapshot } | { ok: false; reason: string }> {
+export async function fetchSnapshot(baseUrl: string, token: string): Promise<{ ok: true; snapshot: MonitorSnapshot } | { ok: false; reason: string }> {
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/a2a/admin/contexts`, {
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/a2a/admin/contexts`, {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(4000),
     })
