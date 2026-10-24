@@ -76,6 +76,8 @@ export interface KeyStatus {
   source?: string
   /** A masked preview, e.g. `sk-3f…9a2K`; never the whole key. */
   masked?: string
+  /** The full value, shown only inside the local console when requested. */
+  value?: string
 }
 
 /** What the detection screen reports. */

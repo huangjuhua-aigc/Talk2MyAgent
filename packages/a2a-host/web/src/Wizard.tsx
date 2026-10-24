@@ -128,6 +128,7 @@ export function Wizard(props: {
           onBack={back}
           onLive={props.onDone}
           fallbackHost={fallbackHost}
+          keys={detectResult?.keys}
         />
       )}
       </SaveContext.Provider>
@@ -306,7 +307,7 @@ function ModelScreen(props: {
   patch: (part: Partial<WizardConfig>) => void
   onBack: () => void
   onNext: () => void
-  keys?: Record<string, { configured: boolean; source?: string; masked?: string }> | undefined
+  keys?: Record<string, { configured: boolean; source?: string; masked?: string; value?: string }> | undefined
 }): React.JSX.Element {
   const { models, activeModelIndex } = props.config
   const setEntry = (index: number, part: Partial<WizardConfig['models'][number]>): void => {
@@ -320,6 +321,8 @@ function ModelScreen(props: {
         // Any historical provider spelling falls back to DeepSeek rather than crashing.
         const info = PROVIDERS[entry.provider] ?? PROVIDERS.deepseek
         const status = props.keys?.[info.keyRef]
+        const suggestions = info.models.map(model => typeof model === 'string' ? { id: model, label: model } : model)
+        const inList = suggestions.some(model => model.id === entry.model)
         return (
           <div className="visitor" key={index}>
             <div className="row">
@@ -336,24 +339,43 @@ function ModelScreen(props: {
                 value={entry.provider}
                 onChange={event => {
                   const provider = event.target.value as WizardConfig['models'][number]['provider']
-                  setEntry(index, { provider, model: PROVIDERS[provider].models[0] ?? '', apiKey: undefined })
+                  const first = PROVIDERS[provider].models[0]
+                  setEntry(index, { provider, model: typeof first === 'string' ? first : first?.id ?? '', apiKey: undefined })
                 }}
               >
                 {Object.entries(PROVIDERS).map(([value, meta]) => (
                   <option key={value} value={value}>{meta.label}</option>
                 ))}
               </select>
-              <input
-                className="grow mono"
-                type="text"
-                list={`model-suggestions-${String(index)}`}
-                value={entry.model}
-                placeholder={info.models[0] ?? '模型 id'}
-                onChange={event => setEntry(index, { model: event.target.value })}
-              />
-              <datalist id={`model-suggestions-${String(index)}`}>
-                {info.models.map(name => <option key={name} value={name} />)}
-              </datalist>
+              {inList ? (
+                <select
+                  className="grow mono"
+                  value={entry.model}
+                  onChange={event => { setEntry(index, { model: event.target.value === '__custom' ? '' : event.target.value }) }}
+                >
+                  {suggestions.map(model => (
+                    <option key={model.id} value={model.id}>{model.label}</option>
+                  ))}
+                  <option value="__custom">自定义…（手输型号）</option>
+                </select>
+              ) : (
+                <div className="row grow">
+                  <input
+                    className="grow mono"
+                    type="text"
+                    value={entry.model}
+                    placeholder="输入模型 id（各家最新型号）"
+                    onChange={event => setEntry(index, { model: event.target.value })}
+                  />
+                  <button
+                    className="quiet"
+                    title="回到清单选择"
+                    onClick={() => { setEntry(index, { model: suggestions[0]?.id ?? '' }) }}
+                  >
+                    ▾
+                  </button>
+                </div>
+              )}
               {models.length > 1 ? (
                 <button className="quiet" onClick={() => {
                   const next = models.filter((_, i) => i !== index)
@@ -367,17 +389,17 @@ function ModelScreen(props: {
             <label className="field" style={{ marginBottom: 0 }}>
               <span>API Key（{info.keyRef}）</span>
               <input
-                type="password"
-                className="key-input"
-                value={entry.apiKey ?? ''}
-                placeholder={status?.configured === true ? '留空沿用现有 Key；粘贴则覆盖' : '粘贴 API Key'}
+                type="text"
+                className="key-input mono"
+                value={entry.apiKey ?? (status?.configured === true ? status.value : '')}
+                placeholder={status?.configured === true ? '留空沿用现有 Key；编辑则覆盖' : '粘贴 API Key'}
                 onChange={event => setEntry(index, {
                   apiKey: event.target.value.length > 0 ? event.target.value : undefined,
                 })}
               />
               <span className="field-note">
                 {status?.configured === true
-                  ? `已检测到现有配置（来自 ${status.source}）：${status.masked}，留空即沿用。`
+                  ? `已检测到现有配置（来自 ${status.source}）：${status.value ?? status.masked}，留空即沿用。`
                   : '尚未检测到这家的 Key，粘贴后写入。'}
                 保存位置：~/.dsh/.credentials.yaml 的 {info.keyRef}，不进配置文件。
               </span>
@@ -386,9 +408,10 @@ function ModelScreen(props: {
         )
       })}
       <div className="row">
-        <button onClick={() => props.patch({
-          models: [...models, { provider: 'deepseek', model: PROVIDERS.deepseek.models[0] ?? '' }],
-        })}>
+        <button onClick={() => {
+          const first = PROVIDERS.deepseek.models[0]
+          props.patch({ models: [...models, { provider: 'deepseek', model: typeof first === 'string' ? first : first?.id ?? '' }] })
+        }}>
           + 添加模型
         </button>
       </div>
@@ -773,6 +796,7 @@ function ReviewScreen(props: {
   onBack: () => void
   onLive: () => void
   fallbackHost?: string | undefined
+  keys?: Record<string, { configured: boolean; source?: string; masked?: string; value?: string }> | undefined
 }): React.JSX.Element {
   const [savedId, setSavedId] = useState<string | undefined>(props.agentId)
   const [phase, setPhase] = useState<'ready' | 'started'>('ready')
@@ -822,6 +846,11 @@ function ReviewScreen(props: {
       <SummaryRow label="模型">
         {provider?.label ?? '—'}　<span className="mono">{active?.model ?? '—'}</span>
         {config.models.length > 1 ? <span className="chip">另有 {config.models.length - 1} 个备用</span> : null}
+        {provider !== undefined ? (
+          props.keys?.[provider.keyRef]?.configured === true
+            ? <span className="chip mono" title={props.keys[provider.keyRef]?.source}>{props.keys[provider.keyRef]?.value ?? props.keys[provider.keyRef]?.masked}</span>
+            : <span className="chip warn">Key 未配置</span>
+        ) : null}
       </SummaryRow>
       <SummaryRow label="服务地址"><span className="mono">{url}</span></SummaryRow>
       <SummaryRow label="访客">

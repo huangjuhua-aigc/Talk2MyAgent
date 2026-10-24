@@ -69,12 +69,12 @@ async function scanKeys(): Promise<Record<string, KeyStatus>> {
     const ref = info.keyRef
     const fromEnv = process.env[ref] ?? ''
     if (fromEnv.length > 0) {
-      keys[ref] = { configured: true, source: `环境变量 ${ref}`, masked: maskKey(fromEnv) }
+      keys[ref] = { configured: true, source: `环境变量 ${ref}`, masked: maskKey(fromEnv), value: fromEnv }
       continue
     }
     const fromDoc = nested[ref] ?? document[ref]
     if (typeof fromDoc === 'string' && fromDoc.length > 0) {
-      keys[ref] = { configured: true, source: '~/.dsh/.credentials.yaml', masked: maskKey(fromDoc) }
+      keys[ref] = { configured: true, source: '~/.dsh/.credentials.yaml', masked: maskKey(fromDoc), value: fromDoc }
       continue
     }
     keys[ref] = { configured: false }
@@ -82,18 +82,28 @@ async function scanKeys(): Promise<Record<string, KeyStatus>> {
   return keys
 }
 
-/** This machine's LAN IPv4 addresses, best-route one first. */
+/** Interface names that mean "not a real network" — usable but never first. */
+const VIRTUAL_INTERFACE = /vEthernet|WSL|Hyper-V|Loopback|VMware|Virtual|Mihomo|TUN|Docker/i
+
+/**
+ * This machine's LAN IPv4 addresses, real interfaces first. A UDP-route probe
+ * runs first (often polluted by proxies/VMs), then the interface scan, then —
+ * on Windows — the system address table, which also sees public unicast
+ * addresses a campus/hotspot WLAN may carry.
+ */
 async function detectLanIps(): Promise<string[]> {
-  const ips: string[] = []
+  const found: { address: string; virtual: boolean }[] = []
+  const add = (address: string, alias: string): void => {
+    if (found.some(entry => entry.address === address)) return
+    found.push({ address, virtual: VIRTUAL_INTERFACE.test(alias) })
+  }
   try {
     const { createSocket } = await import('node:dgram')
     await new Promise<void>((resolve) => {
       const socket = createSocket('udp4')
-      // Connecting a UDP socket picks a route without sending anything; the
-      // chosen local address is the one the default gateway would see.
       socket.once('connect', () => {
         const address = socket.address()
-        if (typeof address === 'object') ips.push(address.address)
+        if (typeof address === 'object') add(address.address, 'probe')
         socket.close()
         resolve()
       })
@@ -103,25 +113,21 @@ async function detectLanIps(): Promise<string[]> {
   } catch {
     // Offline or blocked: fall back to the interface scan below.
   }
-  const keep = (address: string): boolean =>
-    /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(address)
-      && !ips.includes(address)
   const { networkInterfaces } = await import('node:os')
-  for (const list of Object.values(networkInterfaces())) {
+  for (const [name, list] of Object.entries(networkInterfaces())) {
     for (const net of list ?? []) {
-      if (net.family === 'IPv4' && !net.internal && keep(net.address)) {
-        ips.push(net.address)
+      if (net.family === 'IPv4' && !net.internal
+        && /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(net.address)) {
+        add(net.address, name)
       }
     }
   }
-  // On Windows, proxies and virtual switches can hide the real WLAN/LAN
-  // address from the interface scan; the system address table knows better.
   if (process.platform === 'win32') {
     try {
       const { spawn } = await import('node:child_process')
       const output = await new Promise<string>((resolve) => {
         const child = spawn('powershell.exe', ['-NoProfile', '-Command',
-          "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch '^(127\\.|169\\.254\\.|198\\.1[89]\\.)' } | ForEach-Object { $_.IPAddress }"])
+          "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch '^(127\\.|169\\.254\\.|198\\.1[89]\\.)' } | ForEach-Object { \"$($_.IPAddress)`t$($_.InterfaceAlias)\" }"])
         let text = ''
         child.stdout?.on('data', (chunk: Buffer) => { text += chunk.toString() })
         child.on('close', () => { resolve(text) })
@@ -129,14 +135,16 @@ async function detectLanIps(): Promise<string[]> {
         setTimeout(() => { child.kill(); resolve(text) }, 5000)
       })
       for (const line of output.split('\n')) {
-        const address = line.trim()
-        if (keep(address)) ips.push(address)
+        const [address, alias] = line.trim().split('\t')
+        if (/^\d{1,3}(\.\d{1,3}){3}$/.test(address ?? '')) add(address as string, alias ?? '')
       }
     } catch {
       // The interface scan above already gave its best.
     }
   }
-  return ips
+  return found
+    .sort((a, b) => Number(a.virtual) - Number(b.virtual))
+    .map(entry => entry.address)
 }
 
 /**

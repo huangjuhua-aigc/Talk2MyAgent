@@ -11,6 +11,13 @@
 
 import type { ProviderKind } from './types.ts'
 
+/** One suggested model: the API id plus the display name when the id alone
+ *  reads poorly (e.g. `deepseek-flash` IS the current V4.1-Flash). */
+export interface SuggestedModel {
+  id: string
+  label: string
+}
+
 /** One provider family the wizard can wire. */
 export interface ProviderInfo {
   /** Display name — no implementation details surface to the user. */
@@ -19,8 +26,8 @@ export interface ProviderInfo {
   route: string
   /** Where this family's API key lives. */
   keyRef: string
-  /** Suggested model ids (verified recent lineups; input stays free-form). */
-  models: string[]
+  /** Suggested models, verified recent lineups; input stays free-form. */
+  models: (string | SuggestedModel)[]
   /** How dsh reaches this family; absent = the direct DeepSeek adapter. */
   piAi?: {
     /** pi-ai catalog provider name, for families the catalog knows. */
@@ -49,7 +56,13 @@ export const PROVIDERS: Record<ProviderKind, ProviderInfo> = {
     label: 'DeepSeek',
     route: 'deepseek-official',
     keyRef: 'DEEPSEEK_API_KEY',
-    models: ['deepseek-flash', 'deepseek-v4-pro'],
+    // Verified against the live GET /models with a real key: these two ids
+    // are the whole official lineup. `deepseek-flash` IS the current
+    // V4.1-Flash (the v4-flash spellings are retired aliases).
+    models: [
+      { id: 'deepseek-flash', label: 'DeepSeek-V4.1-Flash' },
+      { id: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro' },
+    ],
   },
   openai: {
     label: 'OpenAI',
@@ -62,35 +75,43 @@ export const PROVIDERS: Record<ProviderKind, ProviderInfo> = {
     label: 'Anthropic',
     route: 'anthropic',
     keyRef: 'ANTHROPIC_API_KEY',
-    models: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'],
+    models: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
     piAi: { provider: 'anthropic' },
   },
   doubao: {
     label: '豆包（火山方舟）',
     route: 'doubao',
     keyRef: 'ARK_API_KEY',
-    models: ['doubao-seed-evolving', 'doubao-seed-2-1-pro-260915', 'doubao-seed-2-1-lite-260915'],
+    models: [
+      'doubao-seed-evolving',
+      'doubao-seed-2-1-pro-260915',
+      'doubao-seed-2-1-lite-260915',
+      'doubao-seed-2-1-turbo-260628',
+      'doubao-seed-2-0-lite-260428',
+      'doubao-seed-2-0-mini-260428',
+      'doubao-seed-character-260628',
+    ],
     piAi: { api: 'openai-completions', baseURL: 'https://ark.cn-beijing.volces.com/api/v3', displayName: '豆包' },
   },
   zhipu: {
     label: '智谱 GLM',
     route: 'zhipu',
     keyRef: 'ZHIPU_API_KEY',
-    models: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2'],
+    models: ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx', 'glm-5.2'],
     piAi: { api: 'openai-completions', baseURL: 'https://open.bigmodel.cn/api/paas/v4', displayName: '智谱 GLM' },
   },
   kimi: {
     label: 'Kimi',
     route: 'kimi',
     keyRef: 'MOONSHOT_API_KEY',
-    models: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'],
+    models: ['kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'],
     piAi: { api: 'openai-completions', baseURL: 'https://api.moonshot.ai/v1', displayName: 'Kimi' },
   },
   stepfun: {
     label: '阶跃星辰',
     route: 'stepfun',
     keyRef: 'STEP_API_KEY',
-    models: ['step-5-preview'],
+    models: ['step-5-preview', 'step-3.7-flash', 'step-3.5-flash'],
     piAi: { api: 'openai-completions', baseURL: 'https://api.stepfun.com/v1', displayName: '阶跃星辰' },
   },
 }
