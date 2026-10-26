@@ -649,18 +649,15 @@ function NetworkScreen(props: {
           </label>
           {showGuide ? (
             <div className="callout">
-              <p style={{ margin: '0 0 6px' }}><strong>跨网络/公网访问的两种方式：</strong></p>
+              <p style={{ margin: '0 0 6px' }}><strong>跨网络访问：</strong></p>
               <p style={{ margin: '0 0 4px' }}>
-                <strong>tailscale（推荐，免公网）</strong>：你与访客都安装
-                <a href="https://tailscale.com" target="_blank" rel="noreferrer"> tailscale </a>
-                并登录同一网络或互相共享设备；在本机运行 <span className="mono">tailscale ip -4</span> 得到
-                100.x.y.z 形式的地址，填到上面即可。链路自动加密，个人免费档够用。
+                <strong>Tailscale Serve（推荐）</strong>：两端安装 Tailscale，加入同一网络或共享设备；
+                按教程只转发 A2A 和名片路径，把得到的完整 HTTPS 地址填到上面，本地端口保持与转发目标一致。
+                保存后重启 agent。<a href="https://github.com/huangjuhua-aigc/Talk2MyAgent/blob/main/docs/tailscale.md" target="_blank" rel="noreferrer">安装、配置与验证教程 →</a>
               </p>
               <p style={{ margin: 0 }}>
-                <strong>公网域名（Cloudflare Tunnel）</strong>：域名托管在 Cloudflare；安装
-                <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/" target="_blank" rel="noreferrer"> cloudflared </a>
-                后运行 <span className="mono">cloudflared tunnel --url http://localhost:3080</span>，
-                把得到的 https://a2a.你的域名 填到上面（保留 https:// 前缀）。TLS 自动配好。
+                已有 HTTPS 域名或反向代理也可填写完整地址；代理只开放 A2A 和名片路径。
+                Portal 的 17890 端口用于本机管理，不需要转发。
               </p>
             </div>
           ) : null}

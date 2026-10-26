@@ -1,50 +1,126 @@
 # Talk2MyAgent
 
-**把你的 AI 开放成一个在线 agent：任何访客（人或别的 agent）都能通过 A2A 协议找到它、跟它聊、派任务。**
+把本地资料开放给获准的 A2A 访客。你的在线 agent 可以聊天、读取你指定工作目录中的文本，并根据本地项目记忆自动更新公开简报；你在本机 Portal 配置模型、访客和资料目录，查看来访记录。
 
-你平时用 Claude Code、ZCode 这些 agent 干活；Talk2MyAgent 让其中一位（跑在
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 上的 dsh agent）
-常驻在线、对外可达——访客拿着你发的地址和令牌就能来聊，你本地有一个可视化控制台
-看谁来过、都聊了什么。
+设备不必在同一个局域网。按下面的 Tailscale 步骤配置后，访客可以从家里、公司或手机热点访问你的 agent。双方需要联网并连接 Tailscale，agent 所在电脑需要保持运行。
 
-## 组成
+- [首次安装与启动](#首次安装与启动)
+- [用 Tailscale 跨网络访问](#用-tailscale-跨网络访问)
+- [完整使用指南](docs/guide.md)
+- [Tailscale 详细教程与排错](docs/tailscale.md)
 
-| 组件 | 仓库 | 状态 |
-| --- | --- | --- |
-| [dsh](https://github.com/deepseek-ai/deepseek-harness) | DeepSeek 官方 | 前置运行时 |
-| [dsh-a2a-server](https://github.com/huangjuhua-aigc/dsh-a2a) | 本组织 | A2A 协议插件（入站服务、开场背景注入、本地监控接口） |
-| 配置与启动指南 | 本仓库 | **[docs/guide.md](docs/guide.md)** ← 从这里开始 |
-| `a2a-host` 配置控制台（向导 + 监控台） | 本仓库 `packages/a2a-host` | **可用**（见下） |
-| `a2a-skill`（出站：你的 agent 去找别人的 agent） | 本仓库 `packages/a2a-skill` | 基础 CLI 已实现并测试；完整协作流程待补 |
-| `a2a-handoff`（跨 agent 上下文迁移） | 本仓库 | 规划中（M4） |
+## 首次安装与启动
 
-## 运行控制台（M3 已交付）
+### 1. 准备运行环境
+
+需要 Git、Node.js 22+、pnpm、DeepSeek Harness（dsh），以及向导中支持的一家模型服务的 API Key。Key 可以在向导里填写。
 
 ```sh
-git clone https://github.com/huangjuhua-aigc/Talk2MyAgent
-cd Talk2MyAgent
-pnpm install
-pnpm --filter @talk2myagent/a2a-host run build:web   # 构建界面（首次需要）
-pnpm --filter @talk2myagent/a2a-host start           # 打开 http://127.0.0.1:17890
+node --version
+npm install -g pnpm @deepseek-ai/dsh@0.2.1-rc.2
+pnpm --version
+dsh --version
 ```
 
-- 首次打开是**七屏向导**（检测 → 名片 → 模型 → 访客 → 工作区 → 网络 → 预览与启动），
-  第 7 屏展示将写入的每个文件，确认后一键写入/装插件/启动；
-- 配置过后打开就是**监控台**：谁来访过、说了什么、agent 答了什么（按访客分组的时间线，
-  5 秒自动刷新），加启停和日志；
-- 只绑 127.0.0.1：它管理令牌，绝不出本机。子命令：`a2a-host start|stop|status|monitor`
-  可脱离界面使用。
-- 命令行流（不打开界面）见指南第 4 节。
+这里固定使用当前插件兼容的 dsh 版本；不要忽略插件安装时的版本不兼容提示。已有兼容环境可跳过安装。[DSH 官方说明](https://github.com/deepseek-ai/deepseek-harness)
 
-### 公开简报
+### 2. 下载两个配套仓库并构建
 
-Portal 的「公开简报」展示工作目录下 `.hop/handoff.md` 的内容与最近更新时间，每 5 秒自动刷新，也可手动编辑保存。自动刷新不会覆盖编辑框中尚未保存的内容。
+在你保存项目的目录执行，两个仓库会成为相邻目录：
 
-「自动更新简报」默认开启：在线 agent 首次启动时整理一次，之后每小时从本地各 agent 的项目相关历史会话中汇总，完成后直接更新 `.hop/handoff.md`，无需草稿审核或采纳。没有新资料或生成失败时，维护指令要求保留原有简报。正式简报会在新访客会话开启时注入；进行中的会话不会自动更新。
+```sh
+git clone https://github.com/huangjuhua-aigc/Talk2MyAgent.git
+git clone https://github.com/huangjuhua-aigc/dsh-a2a.git
+cd dsh-a2a
+pnpm install
+pnpm build
+cd ../Talk2MyAgent
+pnpm install
+pnpm --filter @talk2myagent/a2a-host run build:web
+pnpm --filter @talk2myagent/a2a-host start
+```
 
-Portal 只提供一个开启/关闭开关，不提供简报任务列表。开关状态持久保存，在线 agent 最迟在下一次 5 秒检查时读取；关闭后停止后续更新，正在执行的一次允许完成，现有简报和手动编辑保留。重新开启后会安排更新，反复刷新页面不会重复创建任务。调度运行于 agent 中，关闭 Portal 页面或控制台进程后仍可继续；agent 离线时暂停，重新启动只补一次到期更新，不补跑每个错过的小时。
+浏览器会打开本机 Portal：[http://127.0.0.1:17890](http://127.0.0.1:17890)。这个地址只用于主人管理，不发给访客。
 
-升级时需同时更新本插件和控制台并重启 agent；控制台启动 agent 时会刷新生成的配置。旧版 Portal 创建的、与当前工作目录和既有提示词精确匹配的「简报维护」任务，会在提供调度服务的 DSH 中自动移除，由新的开关接管。已有 `handoff.draft.md` 不会自动发布。
+**当前主分支需配套源码插件。** 2026-10-26 核对时，npm 的 `dsh-a2a-server` 最新发布仍为 `0.2.0`，不包含主分支的权限修复与自动简报开关。请完成下一步的本地插件安装，不能仅依赖向导自动安装 npm 旧版。配套代码见 [dsh-a2a](https://github.com/huangjuhua-aigc/dsh-a2a)。
+
+### 3. 在向导里保存配置
+
+| 页面 | 填写内容 |
+| --- | --- |
+| 环境检测 | 确认 Node 和 dsh 可用 |
+| 名片 | 首次示例取名 `my-agent`，描述你允许访客查询的内容 |
+| 模型 | 选择服务商和模型，填写或沿用 API Key |
+| 网络 | 先选「自定义地址」，填写 `127.0.0.1`，端口 `3080`；先完成本机验证，稍后切到 Tailscale HTTPS 地址 |
+| 访客 | 每位访客使用独立令牌，勾选「允许对话和读取指定工作目录」 |
+| 工作区 | 选择愿意向这些访客提供的本地资料目录 |
+| 保存启动 | 先点「保存」，完成下面的源码插件安装，再点「启动」 |
+
+当前访客只允许聊天和 `read_file`；写文件、执行命令等其他工具保持关闭。模型 API Key、主人管理令牌与访客令牌用途不同，发给访客的只有其自己的访客令牌。
+
+### 4. 安装源码插件并启动 agent
+
+首次创建且名字没有重名时，`my-agent` 对应 profile `a2a-my-agent`。如果改名、重名或已有配置，请以 `~/.a2a/agents/<agentId>.json` 中的 `profile` 字段为准；Windows 的 `~` 是用户目录。
+
+另开一个终端，进入 `Talk2MyAgent` 仓库根目录。以下第一条**只用于尚未创建的 profile**；已有 profile 不要再次使用 `--from-default-profile`，它会重建该 profile。
+
+```sh
+dsh --profile a2a-my-agent --from-default-profile web --dump-config
+dsh plugin --profile a2a-my-agent add ../dsh-a2a
+```
+
+`--dump-config` 在这里用于初始化 Web profile 并输出配置，不启动监听服务。安装失败时先按提示修复，不继续启动。然后回 Portal 点「启动」→「进入控制台」。已有部署升级时，先停止 agent，构建并重新安装源码插件，再从 Portal 启动；详见[升级步骤](docs/guide.md#升级)。
+
+本机检查名片，Windows PowerShell 使用 `curl.exe`，macOS/Linux 使用 `curl`：
+
+```sh
+curl http://127.0.0.1:3080/.well-known/agent-card.json
+```
+
+返回 JSON 名片后，继续配置跨网络访问；名片可读不代表令牌和模型已经验证，带令牌对话见下面的教程。
+
+## 用 Tailscale 跨网络访问
+
+推荐使用 **Tailscale Serve + HTTPS**。它把获准设备的请求转发到本机 agent，双方不需要同一 Wi-Fi，也不需要公网 IP 或购买域名。Serve 的访问范围是获准的 Tailscale 设备；公网开放是另外的 Funnel 功能，本教程使用 Serve。[Tailscale Serve 官方说明](https://tailscale.com/docs/features/tailscale-serve)
+
+1. **两端安装并登录 Tailscale。** 自己的两台设备加入同一 tailnet；给朋友使用时，在 Tailscale 管理后台共享 agent 所在设备，让朋友用自己的账号接受共享。双方客户端保持连接。安装和共享的逐步说明见[详细教程](docs/tailscale.md#1-两端安装并连接-tailscale)。
+2. **主机配置转发。** 保持 agent 监听 `127.0.0.1:3080`，在运行 agent 的电脑执行：
+
+   ```sh
+   tailscale serve status
+   tailscale serve --bg --https=443 --set-path=/a2a http://127.0.0.1:3080/a2a
+   tailscale serve --bg --https=443 --set-path=/.well-known/agent-card.json http://127.0.0.1:3080/.well-known/agent-card.json
+   tailscale serve status
+   ```
+
+   首次使用按命令提示启用 HTTPS。先检查 `status`；若 443 已被其他 Serve/Funnel 配置使用，先看[端口冲突说明](docs/tailscale.md#2-只转发-a2a-接口)。本例只转发 A2A 和名片，不转发整个 DSH Web 服务或 Portal 的 `17890` 端口。[命令参考](https://tailscale.com/docs/reference/tailscale-cli/serve)
+3. **回填外部地址。** 从 `status` 复制实际 HTTPS 地址，例如 `https://my-pc.example-tailnet.ts.net`。Portal →「编辑配置」→「网络」→「自定义地址」填这个完整地址，保留 `https://`；本地端口仍是 `3080`。保存后停止并重新启动 agent。Portal 自动补齐 `/a2a`，HTTPS 域名模式默认保持本地回环监听。
+4. **在另一网络验证。** 让另一台电脑切到手机热点，连接 Tailscale，按[访客验证步骤](docs/tailscale.md#4-在另一网络验证并开始对话)读取名片并携带访客令牌发送消息。
+
+访客最终使用的 URL 形如 `https://my-pc.example-tailnet.ts.net/a2a`；请用自己的实际地址替换示例。浏览器直接打开 `/a2a` 不会显示聊天页面，它是 A2A RPC 接口。访客可使用自己的 A2A 客户端，或仓库内的 `packages/a2a-skill/bin/a2a.mjs`。
+
+完整教程还包含：设备共享、访问策略、Windows/macOS/Linux 命令、`100.x` 地址直连的区别、401/403/502 排查和停止转发。见 **[docs/tailscale.md](docs/tailscale.md)**。
+
+## 公开简报与日常使用
+
+「自动更新简报」默认开启。在线 agent 首次启动整理一次，之后每小时从本地项目相关历史会话中汇总，完成后直接更新 `<工作区>/.hop/handoff.md`，无需确认。维护指令要求没有新资料或生成失败时保留原文件。
+
+Portal 展示内容和更新时间，每 5 秒刷新，支持手动编辑。只有一个自动更新开关，没有简报任务列表。关闭后保留现有简报，已经开始的一次允许完成；设置重启后保留。新访客会话加载最新版，已经进行的会话不会重新注入。
+
+关闭 Portal 页面或进程不会停止在线 agent；停止 agent 请用 Portal 的「停止」。电脑睡眠、关机或 agent 停止后无法接待访客。重启电脑后需要重新启动 agent；Tailscale 转发启动不等于 agent 已启动。
+
+更多操作、文件位置与升级步骤见[完整使用指南](docs/guide.md)。
+
+## 项目组成
+
+| 组件 | 作用 |
+| --- | --- |
+| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | 模型与 agent 运行时 |
+| [dsh-a2a-server](https://github.com/huangjuhua-aigc/dsh-a2a) | 入站 A2A、受限文件读取、独立管理 IPC、自动简报 |
+| `packages/a2a-host` | 本机配置向导与监控 Portal |
+| `packages/a2a-skill` | 基础出站 CLI：通讯录、名片、发送消息、任务查询 |
+
+本版本不提供隧道管理、访客网页聊天、PDF/Word/OCR/全文检索或跨 agent 上下文迁移；Tailscale 由用户按教程配置。
 
 ## 自动化测试
 
@@ -53,32 +129,7 @@ pnpm --filter @talk2myagent/a2a-host test:all
 pnpm --filter @talk2myagent/a2a-skill test
 ```
 
-控制台测试包括真实本机 HTTP/IPC 与独立临时文件，以及 Playwright 浏览器用例。Windows 默认使用已安装的 Edge；其他系统先运行 `pnpm --filter @talk2myagent/a2a-host exec playwright install chromium`。浏览器选择、用例清单和报告位置见 [测试说明](packages/a2a-host/tests/README.md)。
-
-## 快速开始
-
-一条命令先尝起来（需 Node 22+，已有 `DEEPSEEK_API_KEY`）：
-
-```sh
-dsh --profile a2a --from-default-profile web
-dsh plugin --profile a2a add dsh-a2a-server
-A2A_PEERS="alice:demo123" …  # 详见指南
-```
-
-完整五步（配置名片、发访客令牌、网络暴露、验证、监控）见
-**《[配置与启动指南](docs/guide.md)》**。
-
-## 路线图
-
-- **M2（已完成）**：指南文档 + 插件开场注入与监控接口（dsh-a2a-server 0.3.0）
-- **M3（已完成）**：`a2a-host` 本地控制台——七屏配置向导 + 监控台（谁来访过、聊了什么）
-- **M4（部分完成）**：出站 skill 已有通讯录、名片读取、发送和任务查询；多轮续聊、流式出站、跨 agent 上下文迁移待实现。
-
-## 安全模型（一句话版）
-
-访客的每条消息都要过四道闸：网络层（隧道/反代 + TLS）→ 身份层（独立 token）→
-应用层（白名单、限流、受控 `read_file` 目录边界）→ 可选的系统隔离。访客只能读取
-授权目录中的文本，写入和命令工具未开放；主人管理走独立本机 IPC。内置只读沙箱本身不限制读范围，未来开放其他工具时仍需单独设计隔离。详见指南第 1、6.1 节。
+包含接口、CLI 和 Playwright UI 用例。Windows 默认使用已安装的 Edge；其他系统先执行 `pnpm --filter @talk2myagent/a2a-host exec playwright install chromium`。测试使用独立临时数据，不改动真实配置。详见[测试说明](packages/a2a-host/tests/README.md)。
 
 ## License
 
