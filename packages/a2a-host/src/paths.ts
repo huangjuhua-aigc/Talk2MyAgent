@@ -25,11 +25,18 @@ export const agentConfigPath = (id: string): string => join(agentsHome(), `${id}
 /** One agent's overlay patch, passed to dsh via `--patch` at launch. */
 export const agentPatchPath = (id: string): string => join(agentsHome(), `${id}.patch.yml`)
 
+/** A small preference file shared with the running plugin; absent means enabled. */
+export const agentBriefingPath = (id: string): string => join(hostHome(), 'briefings', `${id}.json`)
+
 /** One agent's compose file (Docker guard only). */
 export const agentComposePath = (id: string): string => join(agentsHome(), `${id}.compose.yaml`)
 
 /** One agent's resident-process PID memory, so a restarted console can stop it. */
 export const agentPidPath = (id: string): string => join(agentsHome(), `${id}.pid`)
+
+/** Private owner/monitoring transport, independent of the public TCP listener. */
+export const agentManagementPath = (id: string): string => process.platform === 'win32'
+  ? `\\\\.\\pipe\\talk2myagent-${id}` : join(hostHome(), 'run', `${id}.sock`)
 
 /** `~/.dsh/.credentials.yaml` — where visitor and admin tokens live. */
 export const credentialsPath = (): string => join(dshHome(), '.credentials.yaml')

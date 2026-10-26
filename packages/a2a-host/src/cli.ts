@@ -13,10 +13,11 @@
 
 import { serve, openBrowser } from './server.ts'
 import { DshRunner } from './dsh.ts'
-import { listAgents } from './files.ts'
-import { agentPatchPath } from './paths.ts'
+import { listAgents, refreshAgentPatch } from './files.ts'
+import { agentManagementPath, agentPatchPath } from './paths.ts'
 import { detect } from './detect.ts'
 import { fetchSnapshot } from './monitor.ts'
+import { resolveBindHost } from './url.ts'
 
 const command = process.argv[2] ?? 'ui'
 /** Optional agent id argument; defaults to the newest saved agent. */
@@ -69,11 +70,9 @@ if (command === 'ui' || command === 'wizard') {
   if (command === 'start') {
     const detected = await detect(agent.profile)
     const firstTime = !detected.profile.exists
-    const configuredHost = agent.config.network.host
-    const bindHost = configuredHost !== undefined && /^\d{1,3}(\.\d{1,3}){3}$/.test(configuredHost)
-      ? configuredHost
-      : detected.lanIps[0] ?? '127.0.0.1'
+    const bindHost = resolveBindHost(agent.config.network, detected.lanIps)
     const bind = { host: bindHost, port: agent.config.network.port }
+    await refreshAgentPatch(agent)
     runner.start(agent.profile, firstTime, agentPatchPath(agent.id), bind)
     console.log(runner.manualCommand(agent.profile, firstTime, agentPatchPath(agent.id), bind))
     console.log('started (closing this console does NOT stop the online agent; use: a2a-host stop)')
@@ -81,7 +80,7 @@ if (command === 'ui' || command === 'wizard') {
     const stopped = runner.stop()
     console.log(stopped ? 'online agent stopped' : 'no running online agent found')
   } else {
-    const result = await fetchSnapshot(`http://127.0.0.1:${String(agent.config.network.port)}`, agent.config.adminToken)
+    const result = await fetchSnapshot(agentManagementPath(agent.id), agent.config.adminToken)
     console.log(JSON.stringify(result, null, 2))
   }
 } else {

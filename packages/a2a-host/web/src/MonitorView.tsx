@@ -10,6 +10,7 @@ import { api, type AgentDetail } from './api.ts'
 import type { MonitorSnapshot } from '../../src/types.ts'
 import { PROVIDERS } from '../../src/providers.ts'
 import { derivedPublicUrl } from '../../src/url.ts'
+import { HandoffCard } from './HandoffCard.tsx'
 
 const STATE_LABELS: Record<string, string> = {
   TASK_STATE_SUBMITTED: '已提交',
@@ -52,119 +53,10 @@ function AgentOverview(props: { detail: AgentDetail }): React.JSX.Element {
       <SummaryRow label="服务地址"><span className="mono">{url}</span></SummaryRow>
       <SummaryRow label="工作区"><span className="mono">{config.isolation.workspaceRoot}</span></SummaryRow>
       <SummaryRow label="访客">
-        {config.peers.length} 位，其中 {trusted} 位可执行任务
+        {config.peers.length} 位，其中 {trusted} 位可对话、读文件
         （{config.peers.map(peer => peer.name).join('、') || '无'}）
       </SummaryRow>
-      <SummaryRow label="隔离">内置沙箱（默认只读）</SummaryRow>
-    </div>
-  )
-}
-
-/** The agent-level host briefing, editable in place, with draft adoption. */
-function HandoffCard(props: { agentId: string }): React.JSX.Element {
-  const [text, setText] = useState<string | undefined>(undefined)
-  const [draft, setDraft] = useState<{ exists: boolean; text: string } | undefined>(undefined)
-  const [showDraft, setShowDraft] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [scheduling, setScheduling] = useState<string | undefined>(undefined)
-
-  const refresh = (): void => {
-    void api.handoff(props.agentId).then(result => { setText(result.text) })
-    void api.handoffDraft(props.agentId).then(setDraft)
-  }
-  useEffect(() => {
-    setText(undefined)
-    setDraft(undefined)
-    refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.agentId])
-
-  if (text === undefined) return <></>
-  return (
-    <div className="card">
-      <h2>主人简报</h2>
-      <p className="hint">
-        每个新访客会话开启时自动注入给模型（进行中的会话不受影响）。推荐写：最近在做什么、关键决定、待办。
-      </p>
-      {draft !== undefined && draft.exists ? (
-        <div className="callout" style={{ marginBottom: 10 }}>
-          <div className="row">
-            <strong>有一份新草稿待审核</strong>
-            <span className="grow" />
-            <button className="quiet" onClick={() => { setShowDraft(value => !value) }}>
-              {showDraft ? '收起' : '预览'}
-            </button>
-            <button
-              disabled={busy}
-              onClick={() => {
-                setBusy(true)
-                void api.adoptDraft(props.agentId).then(() => {
-                  setBusy(false)
-                  refresh()
-                })
-              }}
-            >
-              采纳为正式简报
-            </button>
-            <button
-              className="quiet"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true)
-                void api.dismissDraft(props.agentId).then(() => {
-                  setBusy(false)
-                  setDraft({ exists: false, text: '' })
-                })
-              }}
-            >
-              忽略
-            </button>
-          </div>
-          {showDraft ? <pre className="code" style={{ marginTop: 8 }}>{draft.text}</pre> : null}
-        </div>
-      ) : null}
-      <textarea
-        rows={6}
-        value={text}
-        placeholder="例如：&#10;最近在做 dsh-a2a 升级…&#10;关键决定：出站用 skill…&#10;待办：发版 0.3.0"
-        onChange={event => { setText(event.target.value) }}
-      />
-      <div className="row" style={{ marginTop: 8 }}>
-        <button
-          className={saved ? 'primary' : undefined}
-          disabled={busy}
-          onClick={() => {
-            setBusy(true)
-            void api.saveHandoff(props.agentId, text).then(() => {
-              setBusy(false)
-              setSaved(true)
-              setTimeout(() => { setSaved(false) }, 2500)
-            })
-          }}
-        >
-          {saved ? '已保存 ✓' : '保存简报'}
-        </button>
-        <span className="small muted">文件位置：&lt;工作区&gt;/.hop/handoff.md</span>
-      </div>
-      <div className="row" style={{ marginTop: 12, borderTop: '1px solid var(--line)', paddingTop: 10 }}>
-        <strong className="small">自动维护</strong>
-        <span className="small muted">让本 agent 每小时自动蒸馏各本地 agent（claude code / codex / zcode / kimi / workbuddy）中与本项目相关的会话，产出草稿待您审核（只读该项目范围，不写正式简报）。</span>
-        <span className="grow" />
-        <button
-          disabled={busy}
-          title="需要在线 agent 正在运行"
-          onClick={() => {
-            setScheduling('正在指示 agent 建立定时任务（最长两分钟）…')
-            void api.scheduleBriefing(props.agentId).then(result => {
-              setScheduling(result.ok ? `已建立：${result.reply.slice(0, 120)}` : `失败：${result.reply.slice(0, 160)}`)
-            })
-          }}
-        >
-          开启定时简报
-        </button>
-      </div>
-      {scheduling !== undefined ? <p className="field-note">{scheduling}</p> : null}
+      <SummaryRow label="权限">仅可读取指定工作目录；其他工具关闭</SummaryRow>
     </div>
   )
 }
@@ -181,13 +73,15 @@ export function MonitorView(props: {
   const [snapshot, setSnapshot] = useState<MonitorSnapshot | undefined>(undefined)
   const [reason, setReason] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState<string>()
+  const visitorContexts = snapshot?.contexts.filter(context => context.peer !== 'owner')
 
   const refresh = (): void => {
-    void api.agent(props.agentId).then(setDetail)
+    void api.agent(props.agentId).then(setDetail).catch(error => setReason(`配置读取失败：${String(error)}`))
     void api.status(props.agentId).then(status => {
       setRunning(status.running)
       setLogs(status.logs)
-    })
+    }).catch(error => setReason(`状态读取失败：${String(error)}`))
     void api.monitor(props.agentId).then(result => {
       if (result.ok) {
         setSnapshot(result.snapshot)
@@ -196,7 +90,15 @@ export function MonitorView(props: {
         setSnapshot(undefined)
         setReason(result.reason)
       }
-    })
+    }).catch(error => setReason(`来访记录读取失败：${String(error)}`))
+  }
+
+  const perform = async (label: string, action: () => Promise<void>): Promise<void> => {
+    setBusy(true)
+    setActionError(undefined)
+    try { await action() }
+    catch (error) { setActionError(`${label}失败：${String(error)}`) }
+    finally { setBusy(false) }
   }
 
   useEffect(() => {
@@ -211,7 +113,7 @@ export function MonitorView(props: {
   return (
     <>
       {detail !== undefined ? <AgentOverview detail={detail} /> : <p className="muted">加载中…</p>}
-      <HandoffCard agentId={props.agentId} />
+      <HandoffCard key={props.agentId} agentId={props.agentId} />
 
       <div className="card">
         <div className="row">
@@ -222,8 +124,7 @@ export function MonitorView(props: {
           <button
             disabled={busy || running === true}
             onClick={() => {
-              setBusy(true)
-              void api.start(props.agentId).then(() => { setBusy(false); setTimeout(refresh, 1500) })
+              void perform('启动', async () => { await api.start(props.agentId); refresh() })
             }}
           >
             启动
@@ -231,8 +132,7 @@ export function MonitorView(props: {
           <button
             disabled={busy || running !== true}
             onClick={() => {
-              setBusy(true)
-              void api.stop(props.agentId).then(() => { setBusy(false); setTimeout(refresh, 1000) })
+              void perform('停止', async () => { await api.stop(props.agentId); refresh() })
             }}
           >
             停止
@@ -244,13 +144,13 @@ export function MonitorView(props: {
             disabled={busy}
             onClick={() => {
               if (detail === undefined || !window.confirm(`删除 Agent「${detail.config.card.name}」？已保存的配置将移除；运行中的实例会先停止。`)) return
-              setBusy(true)
-              void api.deleteAgent(props.agentId).then(() => { setBusy(false); props.onDeleted() })
+              void perform('删除', async () => { await api.deleteAgent(props.agentId); props.onDeleted() })
             }}
           >
             删除
           </button>
         </div>
+        {actionError ? <p role="alert" className="field-note">{actionError}</p> : null}
         {showLogs ? <pre className="code" style={{ marginTop: 12 }}>{logs.slice(-40).join('\n') || '（暂无日志）'}</pre> : null}
       </div>
 
@@ -258,10 +158,10 @@ export function MonitorView(props: {
         <h2>来访记录</h2>
         <p className="hint">谁来访过、说了什么、agent 答了什么（5 秒自动刷新；仅本机可见）。</p>
         {reason !== undefined ? <p className="muted">{reason}</p> : null}
-        {snapshot !== undefined && snapshot.contexts.length === 0 ? (
+        {visitorContexts?.length === 0 ? (
           <p className="muted">还没有访客来过。把地址和令牌发出去，等第一条消息进来。</p>
         ) : null}
-        {snapshot?.contexts.map(context => (
+        {visitorContexts?.map(context => (
           <div className="context" key={context.contextId}>
             <header>
               <strong>{context.peer}</strong>

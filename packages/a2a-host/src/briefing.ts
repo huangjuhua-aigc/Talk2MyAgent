@@ -1,16 +1,38 @@
 /**
- * The briefing-maintenance bootstrap: the message the console sends to its
- * own agent (as the owner identity) to set up the recurring handoff task.
+ * One briefing update executed by the online agent's automatic maintenance loop.
  *
  * The distilled task carries the scope fence (only this workspace's sessions
- * across known agent stores), the disclosure discipline, and the draft-only
- * landing spot — the owner adopts a draft in the console before it ever
- * reaches a visitor.
+ * across known agent stores) and the disclosure discipline. In the open-source
+ * console it updates the live briefing directly when the task finishes.
  *
  * @module a2a-host/briefing
  */
 
-import type { AgentRecord } from './files.ts'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { agentBriefingPath } from './paths.ts'
+
+export async function automaticBriefingEnabled(id: string): Promise<boolean> {
+  try {
+    const setting = JSON.parse(await readFile(agentBriefingPath(id), 'utf8')) as { enabled: unknown }
+    if (typeof setting.enabled !== 'boolean') throw new Error('invalid automatic briefing setting')
+    return setting.enabled
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true
+    throw error
+  }
+}
+
+export async function setAutomaticBriefing(id: string, enabled: boolean): Promise<void> {
+  const file = agentBriefingPath(id)
+  await mkdir(dirname(file), { recursive: true })
+  const temporary = `${file}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporary, JSON.stringify({ enabled }), { mode: 0o600 })
+    await rename(temporary, file)
+  } finally { await rm(temporary, { force: true }) }
+}
 
 /** Where the known local agents keep their session data, per family. */
 function storeHints(root: string): string {
@@ -31,6 +53,7 @@ export function briefingTaskPrompt(root: string): string {
     '【简报维护任务】受信任的项目范围只有一个：',
     `  ${root}`,
     '与该目录无关的任何项目、任何内容，一律不读、不写进简报。',
+    '这是一次自动更新，不要创建或修改定时任务，也不要等待人工确认。',
     '',
     '步骤：',
     '1. 只收集与上述目录相关的本地各 agent 会话（只看最近 48 小时内有修改的文件，读最近几段会话即可，不必全量）：',
@@ -44,22 +67,9 @@ export function briefingTaskPrompt(root: string): string {
     '3. 披露纪律（硬性）：只写与该项目相关的工作内容；密钥、token、凭据、',
     '   私人通信、他人隐私、与项目无关的个人信息一律不得写入；',
     '   不确定能否对外披露的内容，一律不写。',
-    '4. 把简报写入当前工作目录的 handoff.draft.md（覆盖旧草稿）。',
-    '   禁止写 handoff.md —— 那是主人审核采纳后才生效的正式简报。',
-  ].join('\n')
-}
-
-/** The one-shot bootstrap the console sends as the owner identity. */
-export function briefingBootstrapPrompt(root: string): string {
-  return [
-    '你是这台机器主人的管家，你的工作目录就是简报目录。',
-    '请现在调用 schedule_create 工具，创建一个定时任务，参数：',
-    '- title: 简报维护',
-    '- cron: { "expression": "0 * * * *", "time_zone": "Asia/Shanghai" }（每小时整点）',
-    '- prompt: 以下任务全文（原样使用，不要改写）：',
-    '---8<---',
-    briefingTaskPrompt(root),
-    '--->8---',
-    '创建成功后，立即按该 prompt 执行一次（产出第一份草稿），然后回复「已建立，草稿已生成」。',
+    '4. 完整生成并检查上述内容后，直接覆盖写入当前工作目录的 handoff.md。',
+    '   这是正式公开简报，无需人工确认或采纳；不要写 handoff.draft.md。',
+    '   没有新的有效资料或生成失败时，保留原有 handoff.md，不要清空或写入半成品。',
+    '5. 写入完成后结束本次任务；Portal 会自动展示 handoff.md 的最新内容。',
   ].join('\n')
 }

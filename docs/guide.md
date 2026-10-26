@@ -12,8 +12,8 @@
 运行起来的东西是一个**在线 dsh agent**（下称"在线 agent"）：
 
 - 访客通过 **A2A 协议**（agent 间互操作的开放标准）发现它、与它对话、给它派任务；
-- 它在你的**指定工作目录**里干活（读代码、查资料、跑命令），像一个远程同事；
-- 每个**访客身份互相隔离**：各自的对话、各自的工作目录，彼此不可见；
+- 它通过受控 `read_file` 读取你的**指定工作目录**中的文本和目录；暂不开放写文件、执行命令等工具；
+- 每个**访客的对话与任务互相隔离**；默认共享同一个授权资料目录，也可配置专属读取目录；
 - **审批类操作自动拒绝**：没人值守时，凡是需要人点"确认"的动作直接拒，
   不会卡住、也不会放行；
 - 限流默认 60 次/分钟/访客，可配置。
@@ -24,8 +24,8 @@
 | --- | --- | --- |
 | 网络层 | tailscale / 反向代理 + TLS | 你的部署（第 4 步） |
 | 身份层 | 每访客独立 Bearer token | 插件 + 你发 token（第 3 步） |
-| 应用层 | 白名单、限流、审批拒绝、per-peer 隔离 | 插件内置 |
-| 系统层 | Docker 容器（推荐默认） | 可选项（第 6.1 节） |
+| 应用层 | 白名单、限流、审批拒绝、专用只读工具校验读取范围 | 插件内置 |
+| 系统层 | 操作系统或容器隔离 | 部署时自行提供（第 6.1 节） |
 
 ## 2. 前置条件
 
@@ -76,17 +76,17 @@ dsh plugin --profile a2a add dsh-a2a-server    # 注意 --profile 必须放在�
       workspaceMode: per-peer                 # 每访客独立工作目录（默认隔离）
       workspaceRoot: /srv/dsh/a2a
       peerWorkspaces:
-        zhangsan: /home/you/code/myrepo       # 可选：让这位访客直接在你的 repo 里干活
+        zhangsan: /home/you/code/myrepo       # 可选：这位访客的专属只读资料目录
     preamble:                                 # 开场背景注入（可选但推荐）
-      files: ['.hop/handoff.md']              # 相对每个访客的工作目录；文件不存在则跳过
+      files: ['.hop/handoff.md']              # 相对 workspaceRoot；文件不存在则跳过
     admin:                                    # 本地监控面（可选但推荐）
       tokenEnv: A2A_ADMIN_TOKEN
-    # 隔离档：dsh 内置沙箱（推荐默认）——bash/文件/终端调用全部受限
+    # sandbox-policy 仅作额外防御，不会为访客启用命令或写入工具
 - insert:
     - id: sandbox-policy
       name: '@deepseek-ai/dsh-sandbox-policy'
       config:
-        mode: read-only                       # 或 workspace-write（允许写工作区内）
+        mode: read-only
         workspaceRoot: /srv/dsh/a2a
 ```
 
@@ -105,7 +105,7 @@ A2A_ADMIN_TOKEN: <再生成一个，给监控台用>
 
 **背景简报**（可选）：在工作目录下放一份 `.hop/handoff.md`——在线 agent
 接待每位访客时会把它作为开场背景（"主人最近在做什么、关键决定、待办"）。
-这份文件由你日常的 agent 或你手写维护，在线 agent 每次开场自动读最新版。
+这份文件可以手动维护。Portal 创建的 agent 默认开启每小时自动更新：首次启动时整理一次，任务完成后直接写入正式简报，无需确认。Portal 只有「自动更新简报」开关，没有任务列表；关闭会停止后续更新并保留现有简报，正在执行的一次允许完成。开关设置在重启后保留；关闭 Portal 不会停止在线 agent 的定时更新。Portal 每 5 秒刷新展示内容；新访客会话自动加载最新版。
 
 ### 第 ③ 步：启动
 
@@ -145,8 +145,7 @@ curl -s http://127.0.0.1:3080/a2a \
 访客侧形态任选：
 
 - 访客是**人**：用 curl / 任意 A2A 客户端；
-- 访客**也跑 dsh**：对称装一遍 dsh-a2a-server，即可互访；
-- 访客是 **claude code / zcode 等**：装 `a2a-skill`（M4 交付）后在通讯录里加一条即可。
+- 访客侧可以使用本仓库 `packages/a2a-skill` 的基础 CLI 或其他 A2A 客户端；仅安装入站插件不会自动获得出站能力。
 
 ## 4. 监控：谁来访过、都聊了什么
 
@@ -154,20 +153,17 @@ curl -s http://127.0.0.1:3080/a2a \
 （按访客分组的会话时间线，含每条任务的访客原话与 agent 回答，自动刷新），并可启停服务、
 看日志、重跑配置向导。
 
-**方式二：命令行**（配置了 `admin.tokenEnv` 即可用）：
+**方式二：命令行**（控制台已保存并配置管理凭据的 agent）：
 
 ```sh
-curl -s http://127.0.0.1:3080/a2a/admin/contexts \
-  -H "authorization: Bearer <A2A_ADMIN_TOKEN 的值>"
+pnpm --filter @talk2myagent/a2a-host start monitor <agentId>
 ```
 
 返回每个在线 context 的：访客身份、工作目录、任务列表（**每条含访客原话
 `input` 与 agent 回答 `output`**）、时间戳。支持
 `/a2a/admin/contexts/<contextId>` 看单个会话。
 
-**两道硬边界**：只接受本机回环连接（127.0.0.1）+ 独立 admin token。绝不要把
-这个端口转发到网络——它能看到所有访客的对话内容。M3 的可视化监控台
-（`a2a-host`）就是在本地调这个接口渲染的。
+管理请求使用 Windows 命名管道或 Unix socket，并要求独立 admin token；公网 HTTP 不挂载管理路由，也不接受主人凭据。Portal 本身只绑定本机回环地址，它管理凭据和访客记录，不应转发到公网。
 
 ## 5. 运维
 
@@ -188,42 +184,21 @@ curl -s http://127.0.0.1:3080/a2a/admin/contexts \
 
 ## 6. 进阶
 
-### 6.1 环境隔离：三档
+### 6.1 读取范围与系统隔离
 
-| 档 | 手段 | 读写边界 | 何时用 |
-| --- | --- | --- | --- |
-| **dsh 内置沙箱（推荐默认）** | dsh 自带进程沙箱（`sandbox-policy`）+ fs/bash/终端沙箱执行器，跨平台（Windows 用 ACL），零额外依赖 | **写**：默认 `read-only` 全盘禁写，可选 `workspace-write` 只许写工作区内，越权直接拒绝。**读**：**不受限**（dsh 官方设计如此，"read-only" 指禁写而非只读工作区） | 访客可信度中等、机器上无敏感文件 |
-| Docker 容器（可选强隔离） | 整套环境进容器 | **读写都圈住**：只有挂载进容器的目录可见可操作（repo 默认 `:ro`），机器其余文件不存在 | 完全不受信的开放场景；**也是唯一能限制读的档** |
-| 不隔离 | 仅 per-peer 工作目录隔离 | 无 | 不推荐 |
+当前访客只能使用专用 `read_file`，由代码校验真实路径、拒绝越界和链接，并排除会话存储目录。支持 UTF-8 文本与目录列表，单文件上限 2 MiB；PDF/Office 内容提取尚未实现。
 
-**给某位访客单独指定目录**：`isolation.peerWorkspaces` 把该访客的 cwd 指到任意路径
-（如一个 repo），其余访客仍用 `workspaceRoot` 下的独立子目录（向导暂未暴露此项，
-手工配置见第②步示例）。
+默认读取范围是 `isolation.workspaceRoot`。配置 `isolation.peerWorkspaces.<访客名>` 时，该访客只读取其专属目录，其他访客仍使用默认资料目录。专属目录配置目前需要手动编辑，向导未提供逐访客目录选择器。
 
-控制台（向导第 5 屏）默认选内置沙箱，勾"允许写入工作区"即切到 `workspace-write`。
-Docker 档的挂载示例：
-
-```sh
-docker run -p 3080:3080 \
-  -e DEEPSEEK_API_KEY -e A2A_PEER_ZHANGSAN -e A2A_ADMIN_TOKEN \
-  -v /home/you/code/myrepo:/workspace/repo:ro \   # repo 只读挂进去；确需它写再去掉 :ro
-  -v /home/you/.agents/skills:/skills:ro \        # skill 目录共享（只读）
-  <镜像>
-```
-
-控制台的 Docker 档会自动生成 Dockerfile + compose 到 `~/.a2a/`。
+`read-only` 沙箱仅限制写入，不能代替上述读取边界；改成 `workspace-write` 也不会为访客增加工具。需要容器或操作系统级隔离时由部署方单独配置；当前 Portal 没有一键 Docker 部署和开放写入的选项。
 
 ### 6.2 接待 prompt
 
-在线 agent 的身份与规矩（"你是主人的对外代理，不许做 X"）通过 dsh 的
-system prompt 配置注入（`personaPrefix`），与背景简报（走开场消息）分工：
-规矩稳定走 prompt，状态频繁走简报。
+访客使用独立的公共系统提示词，避免继承主人的个性化提示与记忆；动态项目背景由公开简报提供。主人维护简报的会话则保留可信本机管理能力。
 
 ### 6.3 让访客在你的 repo 里干活
 
-`isolation.peerWorkspaces` 把某位受信任访客的工作目录指到你的 repo（见第 ② 步
-配置示例）。注意这是**信任决策**：该访客的 agent 能读写那个目录（Docker 档
-默认 `:ro` 只读）。
+`isolation.peerWorkspaces` 可以把某位获准访客的读取范围指定为你的 repo（见第 ② 步配置示例）。该目录中的文本会提供给此访客；当前仍仅允许读取，不开放写文件和命令执行。
 
 ---
 

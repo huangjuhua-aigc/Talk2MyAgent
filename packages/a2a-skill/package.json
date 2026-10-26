@@ -4,6 +4,9 @@
   "private": true,
   "description": "A2A agent skill: contact book + zero-dependency CLI for calling other agents over A2A v1.0",
   "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
   "bin": {
     "a2a": "bin/a2a.mjs"
   },

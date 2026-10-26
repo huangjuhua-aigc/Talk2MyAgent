@@ -53,7 +53,7 @@ type View =
   | { kind: 'loading' }
   | { kind: 'empty' }
   | { kind: 'console'; agentId: string }
-  | { kind: 'wizard'; agentId?: string; initial: WizardConfig }
+  | { kind: 'wizard'; agentId?: string; initial: WizardConfig; formKey: string }
 
 export function App(): React.JSX.Element {
   const [view, setView] = useState<View>({ kind: 'loading' })
@@ -79,7 +79,7 @@ export function App(): React.JSX.Element {
 
   const startEdit = (agentId: string): void => {
     void api.agent(agentId).then(detail => {
-      setView({ kind: 'wizard', agentId, initial: migrate(detail.config) })
+      setView({ kind: 'wizard', agentId, initial: migrate(detail.config), formKey: crypto.randomUUID() })
     })
   }
 
@@ -105,7 +105,8 @@ export function App(): React.JSX.Element {
           <button
             className="agent-item new"
             onClick={() => {
-              setView({ kind: 'wizard', initial: { ...DEFAULT_CONFIG, adminToken: newToken() } })
+              setView({ kind: 'wizard', initial: { ...DEFAULT_CONFIG, adminToken: newToken(),
+                peers: DEFAULT_CONFIG.peers.map(peer => ({ ...peer, token: newToken() })) }, formKey: crypto.randomUUID() })
             }}
           >
             + 新建 Agent
@@ -122,13 +123,18 @@ export function App(): React.JSX.Element {
           ) : null}
           {view.kind === 'wizard' ? (
             <Wizard
+              key={view.formKey}
               initial={view.initial}
               agentId={view.agentId}
-              onDone={reload}
+              onDone={agentId => {
+                if (agentId !== undefined) setView({ kind: 'console', agentId })
+                reload()
+              }}
             />
           ) : null}
           {view.kind === 'console' ? (
             <MonitorView
+              key={view.agentId}
               agentId={view.agentId}
               onEdit={() => { startEdit(view.agentId) }}
               onDeleted={reload}

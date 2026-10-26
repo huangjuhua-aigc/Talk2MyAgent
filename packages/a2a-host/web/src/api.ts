@@ -1,9 +1,10 @@
 /** Typed wrappers over the console CLI's /api. */
 
-import type { DetectResult, MonitorSnapshot, WizardConfig } from '../../src/types.ts'
+import type { DetectResult, HandoffSnapshot, MonitorSnapshot, WizardConfig } from '../../src/types.ts'
 
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(path)
+  if (!response.ok) throw new Error(`请求失败（HTTP ${response.status}）`)
   return await response.json() as T
 }
 
@@ -13,6 +14,7 @@ async function post<T>(path: string, body?: unknown, method = 'POST'): Promise<T
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   })
+  if (!response.ok) throw new Error(`请求失败（HTTP ${response.status}）`)
   return await response.json() as T
 }
 
@@ -53,12 +55,9 @@ export const api = {
   stop: (id: string) => post<{ stopped: boolean }>(`/api/agents/${encodeURIComponent(id)}/stop`),
   status: (id: string) => get<{ running: boolean; logs: string[] }>(`/api/agents/${encodeURIComponent(id)}/status`),
   monitor: (id: string) => get<{ ok: true; snapshot: MonitorSnapshot } | { ok: false; reason: string }>(`/api/agents/${encodeURIComponent(id)}/monitor`),
-  handoff: (id: string) => get<{ text: string }>(`/api/agents/${encodeURIComponent(id)}/handoff`),
+  handoff: (id: string) => get<HandoffSnapshot>(`/api/agents/${encodeURIComponent(id)}/handoff`),
   saveHandoff: (id: string, text: string) => post<{ saved: boolean; note: string }>(`/api/agents/${encodeURIComponent(id)}/handoff`, { text }, 'PUT'),
-  handoffDraft: (id: string) => get<{ exists: boolean; text: string }>(`/api/agents/${encodeURIComponent(id)}/handoff-draft`),
-  adoptDraft: (id: string) => post<{ adopted: boolean }>(`/api/agents/${encodeURIComponent(id)}/handoff-draft`, undefined, 'POST'),
-  dismissDraft: (id: string) => post<{ dismissed: boolean }>(`/api/agents/${encodeURIComponent(id)}/handoff-draft`, undefined, 'DELETE'),
-  scheduleBriefing: (id: string) => post<{ ok: boolean; reply: string }>(`/api/agents/${encodeURIComponent(id)}/briefing-schedule`, {}),
+  setAutomaticBriefing: (id: string, enabled: boolean) => post<{ enabled: boolean }>(`/api/agents/${encodeURIComponent(id)}/briefing-auto`, { enabled }, 'PUT'),
   pickDirectory: () => post<{ ok: true; path: string } | { ok: false; reason: string }>('/api/pick-directory'),
   ensurePlugin: () => post<{ ok: boolean; output: string }>('/api/ensure-plugin'),
 }

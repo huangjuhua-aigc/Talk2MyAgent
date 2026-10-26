@@ -8,7 +8,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 import { api, newToken } from './api.ts'
 import type { DetectResult, PeerEntry, WizardConfig } from '../../src/types.ts'
 import { PROVIDERS } from '../../src/providers.ts'
-import { derivedPublicUrl } from '../../src/url.ts'
+import { previewPublicUrl as derivedPublicUrl } from '../../src/url.ts'
 
 export const DEFAULT_CONFIG: WizardConfig = {
   card: { name: 'my-agent', description: '能读代码、查资料、跑任务的在线 agent。' },
@@ -29,7 +29,7 @@ export function Wizard(props: {
   initial: WizardConfig
   /** Present when EDITING a saved agent; absent when creating a new one. */
   agentId?: string | undefined
-  onDone: () => void
+  onDone: (agentId?: string) => void
 }): React.JSX.Element {
   const [screen, setScreen] = useState(0)
   // Editing an existing agent: every screen is already populated, so every
@@ -39,6 +39,7 @@ export function Wizard(props: {
   const [detectResult, setDetectResult] = useState<DetectResult | undefined>(undefined)
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [saveError, setSaveError] = useState<string>()
   const refreshDetect = (): void => { void api.detect().then(setDetectResult) }
   useEffect(refreshDetect, [])
   const patch = (part: Partial<WizardConfig>): void => {
@@ -61,11 +62,11 @@ export function Wizard(props: {
   const saveNow = (): void => {
     if (props.agentId === undefined || !saveable) return
     setBusy(true)
+    setSaveError(undefined)
     void api.updateAgent(props.agentId, config).then(() => {
-      setBusy(false)
       setSaved(true)
       setTimeout(() => { setSaved(false) }, 2500)
-    })
+    }).catch(error => setSaveError(`保存失败：${String(error)}`)).finally(() => setBusy(false))
   }
   /** When the user set no address, instructions still need a real one: the
    *  detected LAN IP first, loopback last. */
@@ -82,6 +83,7 @@ export function Wizard(props: {
 
   return (
     <>
+      {saveError ? <p role="alert" className="field-note">{saveError}</p> : null}
       <div className="steps">
         {STEPS.map((step, index) => (
           <button
@@ -490,7 +492,7 @@ function VisitorsScreen(props: {
               checked={peer.trusted}
               onChange={event => update(index, peer.name, peer.token, event.target.checked)}
             />
-            <span>可执行任务（使用工具、读写文件）；不勾选则仅限对话</span>
+            <span>允许对话和读取指定工作目录；不勾选则禁止访问。暂不开放写文件、执行命令等其他工具。</span>
           </label>
           <div className="row">
             <button
@@ -533,22 +535,21 @@ function WorkspaceScreen(props: {
   return (
     <div className="card">
       <h2>工作区</h2>
-      <p className="hint">访客的 agent 在哪个目录干活。开场背景注入与 dsh 内置沙箱（默认只读）自动开启，无需配置。</p>
+      <p className="hint">选择 agent 可以读取的本地资料目录。获准访客可以让它查询这里的文件，开场简报仍会自动注入。</p>
       <PathField
-        label="工作区根目录（绝对路径）"
+        label="工作目录（允许读取的资料目录，绝对路径）"
         value={isolation.workspaceRoot}
         placeholder="点击右侧在资源管理器中选择，或直接输入"
         onChange={path => props.patch({ isolation: { ...isolation, workspaceRoot: path } })}
       />
       <div className="callout">
-        <strong>目录结构</strong>（每位访客自动获得根目录下的独立子目录，无需配置）：
+        <strong>目录结构</strong>（根目录中的资料供获准访客读取；运行目录按访客区分）：
         <pre className="code" style={{ margin: '6px 0' }}>{`<根目录>/
 ├── zhangsan/   ← 访客 zhangsan 的 agent 在这里干活（cwd）
 ├── lisi/       ← 访客 lisi 的 agent 在这里干活
 └── docs/…      ← 直接放在根目录下的文件 = 公共只读区（共享资料、说明）`}</pre>
-        写操作由内置沙箱锁定：<strong>默认全盘禁写</strong>，访客不能改动任何文件；确需让它写自己的子目录时，
-        把配置文件里 sandbox-policy 的 mode 改为 workspace-write（写边界仍以各自工作目录为准）。
-        访客之间的对话与记忆完全隔离；注意文件"读"不受沙箱限制——访客之间不保密，保密靠"都是你授权的人"这一前提。
+        当前只开放<strong>读取文本文件和查看目录</strong>，不能读取所选目录以外的文件；写入、命令等工具以后逐步开放。
+        访客之间的会话单独保存，系统会话存储不会通过文件读取开放。请将允许分享的资料放在这个工作目录中。
       </div>
       <Nav onBack={props.onBack} onNext={props.onNext} nextDisabled={isolation.workspaceRoot.length === 0} />
     </div>
@@ -565,6 +566,8 @@ function NetworkScreen(props: {
   const { network } = props.config
   const [showGuide, setShowGuide] = useState(false)
   const derived = derivedPublicUrl(network)
+  const invalidAddress = network.mode === 'custom' && derived === undefined
+  const invalidPort = !Number.isInteger(network.port) || network.port < 1 || network.port > 65535
   const useLan = (ip: string): void => {
     props.patch({ network: { ...network, mode: 'lan', host: ip } })
   }
@@ -667,6 +670,8 @@ function NetworkScreen(props: {
         <span>端口（dsh web 服务监听端口）</span>
         <input
           type="number"
+          min={1}
+          max={65535}
           value={network.port}
           onChange={event => props.patch({ network: { ...network, port: Number(event.target.value) || 3080 } })}
         />
@@ -676,7 +681,9 @@ function NetworkScreen(props: {
       ) : (
         <p className="field-note">还没定地址——下一屏发给访客的指令里地址会是占位符。</p>
       )}
-      <Nav onBack={props.onBack} onNext={props.onNext} />
+      {invalidAddress ? <p role="alert" className="field-note">请填写有效的对外地址，不含用户名、密码、查询参数或片段。</p> : null}
+      {invalidPort ? <p role="alert" className="field-note">端口必须是 1 到 65535 之间的整数。</p> : null}
+      <Nav onBack={props.onBack} onNext={props.onNext} nextDisabled={invalidAddress || invalidPort} />
     </div>
   )
 }
@@ -794,7 +801,7 @@ function ReviewScreen(props: {
   patch: (part: Partial<WizardConfig>) => void
   agentId?: string | undefined
   onBack: () => void
-  onLive: () => void
+  onLive: (agentId: string) => void
   fallbackHost?: string | undefined
   keys?: Record<string, { configured: boolean; source?: string; masked?: string; value?: string }> | undefined
 }): React.JSX.Element {
@@ -804,6 +811,7 @@ function ReviewScreen(props: {
   const [logs, setLogs] = useState<string[]>([])
   const [manual, setManual] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
   const config = props.config
 
   useEffect(() => {
@@ -814,23 +822,29 @@ function ReviewScreen(props: {
 
   const save = async (): Promise<void> => {
     setBusy(true)
-    if (savedId !== undefined) {
-      await api.updateAgent(savedId, config)
-    } else {
-      const result = await api.createAgent(config)
-      setSavedId(result.record.id)
-    }
-    setSaved(true)
-    setTimeout(() => { setSaved(false) }, 2500)
-    setBusy(false)
+    setError(undefined)
+    try {
+      if (savedId !== undefined) {
+        await api.updateAgent(savedId, config)
+      } else {
+        const result = await api.createAgent(config)
+        setSavedId(result.record.id)
+      }
+      setSaved(true)
+      setTimeout(() => { setSaved(false) }, 2500)
+    } catch (error) { setError(`保存失败：${String(error)}`) }
+    finally { setBusy(false) }
   }
   const start = async (): Promise<void> => {
     if (savedId === undefined) return
     setBusy(true)
-    const result = await api.start(savedId)
-    setManual(result.manual)
-    setPhase('started')
-    setBusy(false)
+    setError(undefined)
+    try {
+      const result = await api.start(savedId)
+      setManual(result.manual)
+      setPhase('started')
+    } catch (error) { setError(`启动失败：${String(error)}`) }
+    finally { setBusy(false) }
   }
 
   const active = config.models[config.activeModelIndex] ?? config.models[0]
@@ -854,7 +868,7 @@ function ReviewScreen(props: {
       </SummaryRow>
       <SummaryRow label="服务地址"><span className="mono">{url}</span></SummaryRow>
       <SummaryRow label="访客">
-        {config.peers.length} 位（{config.peers.map(peer => peer.name).join('、')}），其中 {trusted} 位可执行任务
+        {config.peers.length} 位（{config.peers.map(peer => peer.name).join('、')}），其中 {trusted} 位可对话、读文件
       </SummaryRow>
       <SummaryRow label="工作区"><span className="mono">{config.isolation.workspaceRoot}</span></SummaryRow>
 
@@ -866,8 +880,10 @@ function ReviewScreen(props: {
           <button className="primary" disabled={busy || savedId === undefined} onClick={() => { void start() }}>启动</button>
         ) : null}
         <span className="grow" />
-        {phase === 'started' ? <button className="primary" onClick={props.onLive}>进入控制台 →</button> : null}
+        {phase === 'started' && savedId !== undefined ? <button className="primary" onClick={() => props.onLive(savedId)}>进入控制台 →</button> : null}
       </div>
+
+      {error ? <p role="alert" className="field-note">{error}</p> : null}
 
       {savedId !== undefined ? (
         <div style={{ marginTop: 16 }}>

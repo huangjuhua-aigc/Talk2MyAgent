@@ -5,12 +5,11 @@
  * @module a2a-host/types
  */
 
-/** One visitor the host declared: a name, the token issued to them, and their
- *  task privilege (conversation is always allowed; tools only when trusted). */
+/** One visitor's identity, credential, and conversation admission. */
 export interface PeerEntry {
   name: string
   token: string
-  /** Whether this visitor may run tasks (use tools, touch files). */
+  /** Whether this visitor may converse and use the rooted read_file capability. */
   trusted: boolean
 }
 
@@ -42,15 +41,16 @@ export interface WizardConfig {
   /** The monitoring token (credential reference A2A_ADMIN_TOKEN). */
   adminToken: string
   isolation: {
-    /** Fixed: every visitor gets its own directory under the root (the wizard
-     *  never offers a shared workspace; the plugin still supports one via
-     *  hand-written config). */
+    /** Owner-selected shared read-only data root. Per-visitor runtime cwd
+     *  directories remain separate beneath it. */
     workspaceRoot: string
-    /** Optional per-visitor working-directory overrides. */
+    /** Optional per-visitor cwd and authorized read-root overrides. */
     peerWorkspaces: Record<string, string>
   }
   network: {
     mode: 'lan' | 'custom'
+    /** Explicit local listener; custom public URLs default to loopback. */
+    bindHost?: string
     /** The address visitors reach: a LAN IP, a tailscale IP, or a domain. */
     host?: string | undefined
     /** Legacy full URL; superseded by `host` but still honored when read. */
@@ -114,4 +114,11 @@ export interface MonitorContext {
 export interface MonitorSnapshot {
   generatedAt: string
   contexts: MonitorContext[]
+}
+
+/** The currently published briefing, as read from the workspace. */
+export interface HandoffSnapshot {
+  text: string
+  updatedAt: string | null
+  autoUpdateEnabled: boolean
 }

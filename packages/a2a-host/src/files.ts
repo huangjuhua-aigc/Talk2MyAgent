@@ -16,10 +16,13 @@ import { parse, stringify } from 'yaml'
 import type { HostState, WizardConfig } from './types.ts'
 import { PROVIDERS, normalizeProvider } from './providers.ts'
 import { derivedPublicUrl } from './url.ts'
+import { briefingTaskPrompt } from './briefing.ts'
 import {
   agentComposePath,
   agentConfigPath,
   agentPatchPath,
+  agentBriefingPath,
+  agentManagementPath,
   agentsHome,
   credentialsPath,
   hostHome,
@@ -88,8 +91,8 @@ function patchRows(config: WizardConfig, adminRef: string, agentId: string): Rec
           skills: [],
         },
         peers,
-        // Task privilege is per visitor: only the trusted ones may run tasks;
-        // everyone authenticated can still converse.
+        // Admitted visitors may converse and read the configured data directory.
+        // The plugin exposes only its scoped read_file; other tools stay denied.
         trustedPeers: config.peers.filter(peer => peer.trusted).map(peer => peer.name),
         isolation: {
           // The wizard always isolates per visitor; a shared workspace remains
@@ -101,7 +104,8 @@ function patchRows(config: WizardConfig, adminRef: string, agentId: string): Rec
         // The opening briefing is always on — it is the product's premise,
         // not a deployment decision.
         preamble: { files: ['.hop/handoff.md'] },
-        admin: { tokenEnv: adminRef },
+        briefing: { settingsFile: agentBriefingPath(agentId), prompt: briefingTaskPrompt(config.isolation.workspaceRoot) },
+        admin: { tokenEnv: adminRef, socketPath: agentManagementPath(agentId) },
         push: { enabled: false },
       },
     },
@@ -123,8 +127,8 @@ function patchRows(config: WizardConfig, adminRef: string, agentId: string): Rec
       config: { providers: piAiRoutes },
     })
   }
-  // The dsh built-in sandbox is always on, read-only — the product's fixed
-  // posture, not a user choice. Writing stays a hand-edited-config escape.
+  // Keep the sandbox as defense in depth. Visitor capabilities are independently
+  // limited to the plugin's rooted reader; this setting cannot grant writes.
   rows.push({
     id: 'sandbox-policy',
     name: '@deepseek-ai/dsh-sandbox-policy',
@@ -235,6 +239,11 @@ export async function saveAgent(record: AgentRecord): Promise<string[]> {
   return written
 }
 
+/** Refresh generated runtime config without rewriting credentials or preferences. */
+export async function refreshAgentPatch(record: AgentRecord): Promise<void> {
+  await writeText(agentPatchPath(record.id), buildPatchYaml(record.config, adminRefFor(record.id), record.id))
+}
+
 /** Read one agent's record; undefined when it does not exist. */
 export async function loadAgent(id: string): Promise<AgentRecord | undefined> {
   try {
@@ -250,6 +259,7 @@ export async function deleteAgentFiles(id: string): Promise<void> {
     rm(agentConfigPath(id), { force: true }),
     rm(agentPatchPath(id), { force: true }),
     rm(agentComposePath(id), { force: true }),
+    rm(agentBriefingPath(id), { force: true }),
   ])
 }
 
