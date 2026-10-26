@@ -1,5 +1,7 @@
 # 用 Tailscale 从不同网络访问 A2A agent
 
+English setup and visitor commands: [English README](../README.en.md#access-from-another-network-with-tailscale).
+
 本教程适用于：agent 在家中电脑运行，你在公司、旅行途中或手机热点下访问；或者把这台电脑上的 agent 分享给指定朋友。
 
 采用 **Tailscale Serve + HTTPS**：主机上的 agent 只监听本机地址，由 Tailscale 转发两个 A2A 路径。访问者需要连接 Tailscale、获得设备访问权限，并持有自己的 A2A 访客令牌。[Serve 官方说明](https://tailscale.com/docs/features/tailscale-serve)
@@ -16,7 +18,7 @@ flowchart LR
 
 ## 0. 先让本机 agent 运行起来
 
-按 [README 的首次启动](../README.md#首次安装与启动)完成配套源码插件安装，在 Portal 里确认：
+按 [README 的首次启动](../README.md#首次安装与启动)完成 `dsh-a2a-server@0.3.0` 插件安装，在 Portal 里确认：
 
 | 项目 | 本教程的值 |
 | --- | --- |

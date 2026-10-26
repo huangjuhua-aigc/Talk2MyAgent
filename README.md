@@ -1,5 +1,7 @@
 # Talk2MyAgent
 
+[简体中文](README.md) · [English](README.en.md)
+
 把本地资料开放给获准的 A2A 访客。你的在线 agent 可以聊天、读取你指定工作目录中的文本，并根据本地项目记忆自动更新公开简报；你在本机 Portal 配置模型、访客和资料目录，查看来访记录。
 
 设备不必在同一个局域网。按下面的 Tailscale 步骤配置后，访客可以从家里、公司或手机热点访问你的 agent。双方需要联网并连接 Tailscale，agent 所在电脑需要保持运行。
@@ -24,17 +26,13 @@ dsh --version
 
 这里固定使用当前插件兼容的 dsh 版本；不要忽略插件安装时的版本不兼容提示。已有兼容环境可跳过安装。[DSH 官方说明](https://github.com/deepseek-ai/deepseek-harness)
 
-### 2. 下载两个配套仓库并构建
+### 2. 下载并构建 Portal
 
-在你保存项目的目录执行，两个仓库会成为相邻目录：
+在你保存项目的目录执行：
 
 ```sh
 git clone https://github.com/huangjuhua-aigc/Talk2MyAgent.git
-git clone https://github.com/huangjuhua-aigc/dsh-a2a.git
-cd dsh-a2a
-pnpm install
-pnpm build
-cd ../Talk2MyAgent
+cd Talk2MyAgent
 pnpm install
 pnpm --filter @talk2myagent/a2a-host run build:web
 pnpm --filter @talk2myagent/a2a-host start
@@ -42,7 +40,7 @@ pnpm --filter @talk2myagent/a2a-host start
 
 浏览器会打开本机 Portal：[http://127.0.0.1:17890](http://127.0.0.1:17890)。这个地址只用于主人管理，不发给访客。
 
-**当前主分支需配套源码插件。** 2026-10-26 核对时，npm 的 `dsh-a2a-server` 最新发布仍为 `0.2.0`，不包含主分支的权限修复与自动简报开关。请完成下一步的本地插件安装，不能仅依赖向导自动安装 npm 旧版。配套代码见 [dsh-a2a](https://github.com/huangjuhua-aigc/dsh-a2a)。
+本指南使用 `dsh-a2a-server@0.3.0`，包含指定目录读取、私有主人入口和自动简报开关。完成下一步的插件安装后再启动 agent。插件的[中文说明](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md)、[英文说明](https://github.com/huangjuhua-aigc/dsh-a2a)和[更新日志](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.zh-CN.md)可单独查阅。
 
 ### 3. 在向导里保存配置
 
@@ -54,11 +52,11 @@ pnpm --filter @talk2myagent/a2a-host start
 | 网络 | 先选「自定义地址」，填写 `127.0.0.1`，端口 `3080`；先完成本机验证，稍后切到 Tailscale HTTPS 地址 |
 | 访客 | 每位访客使用独立令牌，勾选「允许对话和读取指定工作目录」 |
 | 工作区 | 选择愿意向这些访客提供的本地资料目录 |
-| 保存启动 | 先点「保存」，完成下面的源码插件安装，再点「启动」 |
+| 保存启动 | 先点「保存」，完成下面的插件安装，再点「启动」 |
 
 当前访客只允许聊天和 `read_file`；写文件、执行命令等其他工具保持关闭。模型 API Key、主人管理令牌与访客令牌用途不同，发给访客的只有其自己的访客令牌。
 
-### 4. 安装源码插件并启动 agent
+### 4. 安装插件并启动 agent
 
 首次创建且名字没有重名时，`my-agent` 对应 profile `a2a-my-agent`。如果改名、重名或已有配置，请以 `~/.a2a/agents/<agentId>.json` 中的 `profile` 字段为准；Windows 的 `~` 是用户目录。
 
@@ -66,10 +64,10 @@ pnpm --filter @talk2myagent/a2a-host start
 
 ```sh
 dsh --profile a2a-my-agent --from-default-profile web --dump-config
-dsh plugin --profile a2a-my-agent add ../dsh-a2a
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.3.0
 ```
 
-`--dump-config` 在这里用于初始化 Web profile 并输出配置，不启动监听服务。安装失败时先按提示修复，不继续启动。然后回 Portal 点「启动」→「进入控制台」。已有部署升级时，先停止 agent，构建并重新安装源码插件，再从 Portal 启动；详见[升级步骤](docs/guide.md#升级)。
+`--dump-config` 在这里用于初始化 Web profile 并输出配置，不启动监听服务。安装失败时先按提示修复，不继续启动。然后回 Portal 点「启动」→「进入控制台」。已有部署升级时，先停止 agent，更新原有 profile 的插件，再从 Portal 启动；详见[升级步骤](docs/guide.md#升级)。
 
 本机检查名片，Windows PowerShell 使用 `curl.exe`，macOS/Linux 使用 `curl`：
 

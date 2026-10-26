@@ -1,6 +1,6 @@
 # Talk2MyAgent 使用指南
 
-本指南说明首次配置之后怎样使用和维护在线 agent。首次下载、构建与安装源码插件从 [README](../README.md#首次安装与启动)开始；不同网络的设备接入见 [Tailscale 教程](tailscale.md)。
+本指南说明首次配置之后怎样使用和维护在线 agent。首次下载、构建与安装插件从 [README](../README.md#首次安装与启动)开始；不同网络的设备接入见 [Tailscale 教程](tailscale.md)。English setup and usage: [English README](../README.en.md).
 
 ## 1. 先分清三个入口
 
@@ -22,13 +22,13 @@ pnpm --filter @talk2myagent/a2a-host start
 
 首次出现配置向导；已有 agent 时点击「+ 新建 Agent」。向导顺序如下：
 
-1. **环境检测**：确认 Node.js 22+、dsh 和模型凭据。界面可以检测插件，但当前主分支仍需按 README 安装配套源码插件。
+1. **环境检测**：确认 Node.js 22+、dsh 和模型凭据。按 README 为 agent 的 profile 安装配套 `dsh-a2a-server@0.3.0`。
 2. **名片**：填写名字和描述。只描述实际开放的能力，例如“读取这个项目的代码和公开简报”。
 3. **模型**：选择服务商、模型，填写 API Key，或沿用检测到的凭据。可配置备用模型，但当前选中的模型决定执行请求所用的配置。
 4. **网络**：首次本机验证选「自定义地址」填 `127.0.0.1`、端口 `3080`；跨网络按 [Tailscale 教程](tailscale.md)建立路径转发后改填完整 HTTPS 地址。
 5. **访客**：为每位访客设置不同的名字和令牌，勾选允许对话和读取指定工作目录。未勾选的访客不能调用 agent；全部取消表示无人获准。
 6. **工作区**：选择本地的绝对目录。这是获准访客可读取的资料范围。
-7. **保存启动**：点击「保存」，为对应 profile 安装已构建的本地插件，再点「启动」和「进入控制台」。源码安装命令见 [README](../README.md#4-安装源码插件并启动-agent)。
+7. **保存启动**：点击「保存」，为对应 profile 安装 `dsh-a2a-server@0.3.0`，再点「启动」和「进入控制台」。安装命令见 [README](../README.md#4-安装插件并启动-agent)。
 
 模型 Key、主人管理令牌只留在主机。分享给访客的是其专属访客令牌与 A2A 地址，以及 Tailscale 的网络访问授权。
 
@@ -112,23 +112,19 @@ pnpm --filter @talk2myagent/a2a-host start monitor my-agent
 
 ## 升级
 
-两个仓库需要配套更新。先在 Portal 停止要升级的 agent，然后关闭旧 Portal 进程。在两个仓库中分别拉取并构建；若有自己未提交的代码，先处理本地改动再更新。
+Portal 与插件需要配套更新。先在 Portal 停止要升级的 agent，然后关闭旧 Portal 进程。在 Talk2MyAgent 仓库根目录更新；若有自己未提交的代码，先处理本地改动再更新。
 
 ```sh
-# 在 dsh-a2a 仓库根目录
-git pull --ff-only
-pnpm install
-pnpm build
-
-# 之后在 Talk2MyAgent 仓库根目录
 git pull --ff-only
 pnpm install
 pnpm --filter @talk2myagent/a2a-host run build:web
-dsh plugin --profile a2a-my-agent add ../dsh-a2a
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.3.0
 pnpm --filter @talk2myagent/a2a-host start
 ```
 
-每组命令在注释指定的仓库执行；profile 与本地插件路径换成实际值。**升级时不要再次使用 `--from-default-profile`**，避免重建已有 profile。再从新 Portal 启动 agent，它会刷新生成的配置。
+将 profile 名称换成实际值。**升级时不要再次使用 `--from-default-profile`**，避免重建已有 profile。再从新 Portal 启动 agent，它会刷新生成的配置。
+
+需要调试插件源码时，可克隆相邻的 `dsh-a2a` 仓库，在其中执行 `pnpm install` 和 `pnpm build`，然后回到 Talk2MyAgent 执行 `dsh plugin --profile a2a-my-agent add ../dsh-a2a`。这是本地开发安装方式；源码更新后需重新构建、安装并重启 agent。
 
 旧 Portal 创建的、与当前工作目录及已知提示词匹配的「简报维护」任务，在提供调度服务的 DSH 中会被清理，由新开关接管。已有 `handoff.draft.md` 不会自动发布。升级后检查正式简报、开关状态和访客访问即可。
 
@@ -138,7 +134,7 @@ pnpm --filter @talk2myagent/a2a-host start
 | --- | --- |
 | Portal 打不开 | 确认先执行了 `build:web`；查看启动终端是否报告 `17890` 被占用 |
 | 需要换 Portal 端口 | PowerShell：`$env:A2A_HOST_PORT='17891'`；macOS/Linux：`export A2A_HOST_PORT=17891`，再启动 Portal |
-| 点启动后没有在线 | 看 dsh 日志；确认对应 profile 已安装主分支源码插件、使用 Web 模板、版本兼容、端口空闲 |
+| 点启动后没有在线 | 看 dsh 日志；确认对应 profile 已安装 0.3.0 插件、使用 Web 模板、版本兼容、端口空闲 |
 | 插件提示 `nothing was installed` | 本次安装没有成功；检查 dsh 与插件 `engines.dsh` 的版本范围，不继续按成功处理 |
 | 找不到模型凭据 | 回「模型」页确认 Key，或检查私有凭据文档的 `refs` 对应项 |
 | 401 / 403 | 检查访客令牌和允许勾选；不要使用主人令牌作为访客令牌 |
