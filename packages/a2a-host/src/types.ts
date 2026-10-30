@@ -48,7 +48,8 @@ export interface WizardConfig {
     peerWorkspaces: Record<string, string>
   }
   network: {
-    mode: 'lan' | 'custom'
+    mode: 'lan' | 'custom' | 'relay'
+    relay?: { provider: 'default' | 'custom'; host?: string; enabled: boolean }
     /** Explicit local listener; custom public URLs default to loopback. */
     bindHost?: string
     /** The address visitors reach: a LAN IP, a tailscale IP, or a domain. */

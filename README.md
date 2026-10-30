@@ -2,6 +2,10 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
+Portal 与调用技能当前版本为 **0.2.0**。已加入[公网中继](docs/relay.md)：Portal 可自动注册、后台连接并复制访客聊天邀请，支持维护者提供的默认 Relay 和自定义 host。此功能需要单独部署 [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server)；尚未内置真实官方地址。
+
+本版还更新了 Portal 布局：主页四个区块可折叠并按 Agent 记忆状态，Relay 地址输入框加宽，启动前检查端口占用。调用技能支持完整中继名片地址，并修复了 `GetTask` 任务查询解析；[技能更新记录](packages/a2a-skill/CHANGELOG.md)。
+
 把本地资料开放给获准的 A2A 访客。你的在线 agent 可以聊天、读取你指定工作目录中的文本，并根据本地项目记忆自动更新公开简报；你在本机 Portal 配置模型、访客和资料目录，查看来访记录。
 
 设备不必在同一个局域网。按下面的 Tailscale 步骤配置后，访客可以从家里、公司或手机热点访问你的 agent。双方需要联网并连接 Tailscale，agent 所在电脑需要保持运行。
@@ -15,7 +19,7 @@
 
 ### 1. 准备运行环境
 
-需要 Git、Node.js 22+、pnpm、DeepSeek Harness（dsh），以及向导中支持的一家模型服务的 API Key。Key 可以在向导里填写。
+需要 Git、Node.js 22.13+、pnpm、DeepSeek Harness（dsh），以及向导中支持的一家模型服务的 API Key。Key 可以在向导里填写。
 
 ```sh
 node --version

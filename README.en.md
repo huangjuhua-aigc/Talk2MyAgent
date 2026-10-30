@@ -2,6 +2,10 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
+Portal and the calling skill are now **0.2.0**. [Public relay](docs/relay.en.md) is available: Portal registers and connects automatically, then generates visitor chat invitations. It supports an operator-provided default Relay and custom hosts. Deploy [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server) separately; no real official endpoint is bundled yet.
+
+This version adds collapsible dashboard cards with per-agent preferences, wider Relay address inputs and a port-availability check before startup. The calling skill supports complete Relay Card URLs and fixes `GetTask` response parsing; see its [changelog](packages/a2a-skill/CHANGELOG.md).
+
 Let authorized A2A visitors talk to your local agent and read text in a directory you choose. The agent also summarizes relevant local project memories into a public briefing. Use the local Portal to configure models, visitor tokens and data directories, and to view the briefing and visitor activity.
 
 Devices can communicate across home, office and mobile networks using Tailscale. Both the agent host and the device sending A2A requests must be online and connected to Tailscale; the host must keep the agent running.
@@ -10,7 +14,7 @@ Devices can communicate across home, office and mobile networks using Tailscale.
 
 ### 1. Prepare the runtime
 
-Install Git, Node.js 22+, pnpm and DeepSeek Harness. You also need an API key for a model provider supported by the wizard; enter it on the model page.
+Install Git, Node.js 22.13+, pnpm and DeepSeek Harness. You also need an API key for a model provider supported by the wizard; enter it on the model page.
 
 ```sh
 node --version

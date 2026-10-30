@@ -58,9 +58,11 @@ type View =
 export function App(): React.JSX.Element {
   const [view, setView] = useState<View>({ kind: 'loading' })
   const [agents, setAgents] = useState<AgentSummary[]>([])
+  const [loadError, setLoadError] = useState<string>()
 
   const reload = (): void => {
     void api.agents().then(list => {
+      setLoadError(undefined)
       setAgents(list)
       setView(previous => {
         if (previous.kind === 'loading') {
@@ -73,52 +75,66 @@ export function App(): React.JSX.Element {
         }
         return previous
       })
-    })
+    }).catch(error => setLoadError(`暂时无法读取 Agent：${String(error)}`))
   }
   useEffect(reload, [])
+
+  const createAgent = (): void => {
+    setView({ kind: 'wizard', initial: { ...DEFAULT_CONFIG, adminToken: newToken(),
+      peers: DEFAULT_CONFIG.peers.map(peer => ({ ...peer, token: newToken() })) }, formKey: crypto.randomUUID() })
+  }
 
   const startEdit = (agentId: string): void => {
     void api.agent(agentId).then(detail => {
       setView({ kind: 'wizard', agentId, initial: migrate(detail.config), formKey: crypto.randomUUID() })
-    })
+    }).catch(error => setLoadError(`配置读取失败：${String(error)}`))
   }
 
   return (
     <>
       <div className="topbar">
-        <h1>Talk2MyAgent</h1>
-        <span className="sub">把你的 AI 开放给访客 · 本地控制台</span>
+        <span className="brand-mark" aria-hidden="true">A2A</span>
+        <div><h1>Talk2MyAgent</h1><div className="sub">让你的 Agent 与世界对话</div></div>
         <span className="spacer" />
+        <span className="local-badge"><span className="dot off" aria-hidden="true" />本地管理</span>
       </div>
       <div className="shell">
-        <aside className="sidebar">
+        <aside className="sidebar" aria-label="Agent 列表">
+          <div className="sidebar-heading"><span>我的 AGENTS</span><span>{agents.length}</span></div>
+          <div className="sidebar-list">
           {agents.map(agent => (
             <button
               key={agent.id}
               className={`agent-item${view.kind === 'console' && view.agentId === agent.id ? ' now' : ''}`}
+              aria-current={view.kind === 'console' && view.agentId === agent.id ? 'page' : undefined}
+              title={`${agent.name} · ${agent.running ? '运行中' : '未运行'}`}
               onClick={() => { setView({ kind: 'console', agentId: agent.id }) }}
             >
               <span className={`dot ${agent.running ? 'on' : 'off'}`} />
               <span className="grow">{agent.name}</span>
             </button>
           ))}
+          </div>
           <button
             className="agent-item new"
-            onClick={() => {
-              setView({ kind: 'wizard', initial: { ...DEFAULT_CONFIG, adminToken: newToken(),
-                peers: DEFAULT_CONFIG.peers.map(peer => ({ ...peer, token: newToken() })) }, formKey: crypto.randomUUID() })
-            }}
+            onClick={createAgent}
           >
             + 新建 Agent
           </button>
+          <p className="sidebar-note">配置模型与共享资料，启动 Agent，再把邀请发给访客。</p>
         </aside>
         <main>
           <ErrorBoundary>
+          {loadError ? <div role="alert">{loadError} <button onClick={reload}>重新加载</button></div> : null}
           {view.kind === 'loading' ? <p className="muted">加载中…</p> : null}
           {view.kind === 'empty' ? (
-            <div className="card">
-              <h2>还没有配置任何在线 Agent</h2>
-              <p className="hint">点左侧「+ 新建 Agent」，七步配置完即可对外开放。</p>
+            <div className="card empty-state">
+              <div className="empty-symbol" aria-hidden="true">↗</div>
+              <span className="eyebrow">开始使用</span>
+              <h2>让你的 Agent 开始接待访客</h2>
+              <p className="hint">选择模型和允许分享的资料，创建一个能替你回答问题、读取项目文件的 Agent。</p>
+              <button className="primary" onClick={createAgent}>创建第一个 Agent →</button>
+              <div className="empty-path"><span>01 配置模型</span><span>02 选择共享资料</span><span>03 发布与邀请</span></div>
             </div>
           ) : null}
           {view.kind === 'wizard' ? (
@@ -128,6 +144,7 @@ export function App(): React.JSX.Element {
               agentId={view.agentId}
               onDone={agentId => {
                 if (agentId !== undefined) setView({ kind: 'console', agentId })
+                else setView(agents[0] ? { kind: 'console', agentId: agents[0].id } : { kind: 'empty' })
                 reload()
               }}
             />
@@ -138,6 +155,7 @@ export function App(): React.JSX.Element {
               agentId={view.agentId}
               onEdit={() => { startEdit(view.agentId) }}
               onDeleted={reload}
+              onChanged={reload}
             />
           ) : null}
           </ErrorBoundary>

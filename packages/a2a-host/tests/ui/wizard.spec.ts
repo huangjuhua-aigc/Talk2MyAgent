@@ -23,6 +23,7 @@ test('U11 wizard rejects invalid network addresses before advancing', async ({ p
   }
   await address.fill('https://agent.example')
   await expect(page.getByText('https://agent.example/a2a', { exact: true })).toBeVisible()
+  await page.getByText('高级网络设置 · 本地端口 3080', { exact: true }).click()
   await page.getByLabel('端口（dsh web 服务监听端口）').fill('70000')
   await expect(next).toBeDisabled()
   await page.getByLabel('端口（dsh web 服务监听端口）').fill('3080')

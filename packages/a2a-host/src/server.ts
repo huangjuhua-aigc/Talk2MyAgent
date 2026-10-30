@@ -28,12 +28,17 @@ import { DshRunner, installPlugin } from './dsh.ts'
 import { fetchSnapshot } from './monitor.ts'
 import { automaticBriefingEnabled, setAutomaticBriefing } from './briefing.ts'
 import { resolveBindHost } from './url.ts'
+import { assertPortAvailable } from './ports.ts'
 import { pickDirectory } from './pick.ts'
 import { agentPatchPath, agentManagementPath } from './paths.ts'
 import type { WizardConfig } from './types.ts'
+import { randomBytes } from 'node:crypto'
+import { defaultRelayHost, invitation, publicationStatus, publish, recordRuntime, stopPublication, validateSharedRoots } from './publication.ts'
 
 /** Fixed by design: the vite dev proxy expects this port. */
 const PORT = Number(process.env['A2A_HOST_PORT'] ?? 17890)
+const csrfToken = randomBytes(32).toString('hex')
+const mutations = new Map<string, Promise<void>>()
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -61,7 +66,8 @@ const runnerFor = (id: string): DshRunner => {
 /** Read one JSON request body. */
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
-  for await (const chunk of req) chunks.push(chunk as Buffer)
+  let size = 0
+  for await (const chunk of req) { size += (chunk as Buffer).length; if (size > 1_000_000) throw new Error('Request body too large'); chunks.push(chunk as Buffer) }
   if (chunks.length === 0) return {}
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
@@ -95,7 +101,7 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
 
 /** `[/api/agents/<id>](/sub...)` → [id, subresource]. */
 function parseAgentPath(pathname: string): { id: string; sub: string } | undefined {
-  const match = /^\/api\/agents\/([^/]+)(?:\/([\w-]+))?/.exec(pathname)
+  const match = /^\/api\/agents\/([a-zA-Z0-9_-]+)(?:\/([\w/-]+))?$/.exec(pathname)
   if (match === null) return undefined
   return { id: decodeURIComponent(match[1] ?? ''), sub: match[2] ?? '' }
 }
@@ -103,6 +109,8 @@ function parseAgentPath(pathname: string): { id: string; sub: string } | undefin
 /** The /api routing table. */
 async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   const route = `${req.method ?? 'GET'} ${url.pathname}`
+
+  if (route === 'GET /api/session') { json(res, 200, { csrfToken, defaultRelayHost: defaultRelayHost() }); return }
 
   if (route === 'GET /api/detect') {
     json(res, 200, await detect('a2a'))
@@ -136,6 +144,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 
   if (route === 'POST /api/agents') {
     const config = await readBody(req) as WizardConfig
+    await validateSharedRoots(config)
     if (config.adminToken === undefined || config.adminToken.length === 0) {
       json(res, 400, { error: 'adminToken is required' })
       return
@@ -161,6 +170,28 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
   const runner = runnerFor(id)
 
+  if (sub === 'publication/status' && req.method === 'GET') {
+    json(res, 200, await publicationStatus(id)); return
+  }
+  if (sub === 'publication/invitation' && req.method === 'POST') {
+    const body = await readBody(req) as { peerName: string }
+    json(res, 200, await invitation(record, body.peerName)); return
+  }
+  if ((sub === 'publication/config' || sub === 'publication/enabled') && req.method === 'PUT') {
+    const body = await readBody(req) as { enabled?: unknown; provider?: unknown; host?: unknown }
+    if (typeof body.enabled !== 'boolean') { json(res, 400, { error: 'enabled must be a boolean' }); return }
+    if (body.provider !== undefined && !['default', 'custom'].includes(String(body.provider))) { json(res, 400, { error: 'Invalid Relay provider' }); return }
+    if (body.host !== undefined && typeof body.host !== 'string') { json(res, 400, { error: 'Invalid Relay host' }); return }
+    await validateSharedRoots(record.config)
+    const previous = record.config.network.relay
+    const relay = { provider: (body.provider ?? previous?.provider ?? 'default') as 'default' | 'custom',
+      host: (body.host ?? previous?.host ?? '') as string, enabled: body.enabled }
+    if (!body.enabled || relay.provider !== previous?.provider || relay.host !== previous?.host) await stopPublication(id)
+    const updated: AgentRecord = { ...record, config: { ...record.config, network: { ...record.config.network, mode: 'relay', relay } }, updatedAt: new Date().toISOString() }
+    await saveAgent(updated)
+    json(res, 200, body.enabled ? await publish(updated) : await publicationStatus(id)); return
+  }
+
   if (sub === '' && req.method === 'GET') {
     json(res, 200, { ...record, running: runner.running })
     return
@@ -168,6 +199,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 
   if (sub === '' && (req.method === 'PUT' || req.method === 'POST')) {
     const config = await readBody(req) as WizardConfig
+    await validateSharedRoots(config)
     if (config.adminToken === undefined || config.adminToken.length === 0) {
       json(res, 400, { error: 'adminToken is required' })
       return
@@ -177,12 +209,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       config,
       updatedAt: new Date().toISOString(),
     }
+    if (JSON.stringify(config) !== JSON.stringify(record.config)) await stopPublication(id)
     const written = await saveAgent(updated)
+    if (runner.running && config.network.mode === 'relay' && config.network.relay?.enabled !== false) await publish(updated)
     json(res, 200, { record: updated, written, note: `admin token stored under ${adminRefFor(id)} in ~/.dsh/.credentials.yaml` })
     return
   }
 
   if (sub === '' && req.method === 'DELETE') {
+    await stopPublication(id)
     await runner.stop()
     await deleteAgentFiles(id)
     runners.delete(id)
@@ -217,27 +252,32 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
 
   if (sub === 'start' && req.method === 'POST') {
+    await validateSharedRoots(record.config)
     // Belt and braces: if the plugin is missing (a fresh profile, or a
     // family beyond the detection screen's default profile), install it
     // before the process starts so the overlay patch finds its package.
     const { extraPackages } = await import('./files.ts')
     const detected = await detect(record.profile)
+    const bindHost = resolveBindHost(record.config.network, detected.lanIps)
+    const bind = { host: bindHost, port: record.config.network.port }
+    if (!runner.running) await assertPortAvailable(bind)
     if (!detected.profile.pluginInstalled) {
       await installPlugin(record.profile, 'dsh-a2a-server')
     }
     for (const pkg of extraPackages(record.config)) {
       await installPlugin(record.profile, pkg)
     }
-    const bindHost = resolveBindHost(record.config.network, detected.lanIps)
-    const bind = { host: bindHost, port: record.config.network.port }
     const firstTime = !detected.profile.exists
     await refreshAgentPatch(record)
     const started = runner.start(record.profile, firstTime, agentPatchPath(id), bind)
+    if (started) await recordRuntime(record, bind)
+    if (record.config.network.mode === 'relay' && record.config.network.relay?.enabled !== false) await publish(record)
     json(res, 200, { started, manual: runner.manualCommand(record.profile, firstTime, agentPatchPath(id), bind) })
     return
   }
 
   if (sub === 'stop' && req.method === 'POST') {
+    await stopPublication(id)
     json(res, 200, { stopped: runner.stop() })
     return
   }
@@ -304,11 +344,32 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
  */
 export async function serve(): Promise<number> {
   const server = createServer((req, res) => {
+    res.setHeader('cache-control', 'no-store')
+    const address = server.address()
+    const port = address && typeof address === 'object' ? address.port : PORT
+    const allowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`]
+    const origin = req.headers.origin
+    if (!allowedHosts.includes(req.headers.host ?? '') || origin !== undefined && !allowedHosts.some(host => origin === `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site') {
+      json(res, 403, { error: 'Local same-origin access required' }); return
+    }
+    if (!['GET','HEAD'].includes(req.method ?? 'GET') && req.headers['x-a2a-csrf'] !== csrfToken && (origin !== undefined || req.headers['sec-fetch-site'] !== undefined || req.url?.includes('/publication/'))) {
+      json(res, 403, { error: 'Local session token required' }); return
+    }
+    if (!['GET','HEAD'].includes(req.method ?? 'GET') && (Number(req.headers['content-length'] ?? 0) > 0 || req.headers['transfer-encoding']) && !req.headers['content-type']?.startsWith('application/json')) {
+      json(res, 415, { error: 'JSON required' }); return
+    }
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     if (url.pathname.startsWith('/api/')) {
-      void api(req, res, url).catch((error: unknown) => {
+      const run = (): Promise<void> => api(req, res, url).catch((error: unknown) => {
         json(res, 500, { error: String(error) })
       })
+      if (req.method === 'GET') void run()
+      else {
+        const key = parseAgentPath(url.pathname)?.id ?? '_global'
+        const next = (mutations.get(key) ?? Promise.resolve()).then(run)
+        mutations.set(key, next)
+        void next.finally(() => { if (mutations.get(key) === next) mutations.delete(key) })
+      }
       return
     }
     void serveStatic(url.pathname, res)

@@ -57,6 +57,17 @@ pnpm --filter @talk2myagent/a2a-host exec playwright install chromium
 | U17 | 确认删除当前 agent 后切到剩余 agent，保留剩余资料 |
 | U18 | 取消删除保留配置 |
 
+## 中继与新版布局用例
+
+设置 `A2A_RELAY_SOURCE` 为独立 [Relay 仓库](https://github.com/huangjuhua-aigc/a2a-relay-server) 的绝对路径，并先在该仓库安装依赖，才能运行全部中继 UI 用例；未设置时明确跳过 3 项中继集成。
+
+- `publication.spec.ts`：3 项真实 Relay / Connector 发布、邀请、调用、关闭与恢复、地址校验、剪贴板回退和未应用配置检查。
+- `layout.spec.ts`：6 项桌面/平板/手机布局、键盘焦点、网络模式切换、访客指令折叠和首次使用。
+- `collapse.spec.ts`：3 项区块独立折叠、按 Agent 持久化、键盘操作、未保存编辑保留及存储不可用时的回退。
+- `ports.test.ts`：3 项本地端口占用、检查后释放和非法端口拒绝。
+
+完整 UI 套件共 31 项；后端与 CLI 共 13 项。调用技能另有 5 项测试，包括符合协议的 `GetTask` 直接 Task 响应。
+
 ## 报告与排查
 
 - `playwright-report/index.html`：HTML 用例报告，包括 U01 成功截图与失败附件。

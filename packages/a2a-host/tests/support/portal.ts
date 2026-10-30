@@ -2,7 +2,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { createServer, type Server } from 'node:http'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -16,7 +16,7 @@ export interface FixtureAgent {
   taskCalls: number
 }
 
-export async function startPortal(agentCount = 2) {
+export async function startPortal(agentCount = 2, options: { relayOrigin?: string; publicA2A?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'a2a-ui-'))
   const host = join(root, 'console')
   const agents: FixtureAgent[] = []
@@ -53,6 +53,28 @@ export async function startPortal(agentCount = 2) {
         briefing: join(workspace, '.hop', 'handoff.md'), taskState: 'TASK_STATE_COMPLETED', taskCalls: 0,
       }
       agents.push(agent)
+      if (options.publicA2A) {
+        const publicServer = createServer(async (req, res) => {
+          const card = { name, supportedInterfaces: [{ url: 'http://127.0.0.1/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
+            capabilities: { streaming: true }, skills: [], securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } } }
+          res.setHeader('content-type', 'application/json')
+          if (req.url === '/.well-known/agent-card.json') { res.end(JSON.stringify(card)); return }
+          if (req.url !== '/a2a') { res.writeHead(404); res.end('{}'); return }
+          if (req.headers.authorization !== `Bearer ${agent.record.config.peers[0]!.token}`) { res.writeHead(401); res.end('{}'); return }
+          let body = ''; for await (const chunk of req) body += String(chunk)
+          const rpc = JSON.parse(body) as { method: string; id: string }
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: rpc.method === 'GetExtendedAgentCard' ? card : {
+            task: { id: 'fixture-public-task', status: { state: 'TASK_STATE_COMPLETED' }, artifacts: [{ parts: [{ text: '公网联调成功：你好 🌈' }] }] } } }))
+        })
+        await new Promise<void>(done => publicServer.listen(0, '127.0.0.1', done))
+        owners.push(publicServer)
+        const address = publicServer.address()
+        if (!address || typeof address === 'string') throw new Error('No fixture port')
+        agent.record.config.network.port = address.port
+        await mkdir(join(host, 'relay', id), { recursive: true })
+        await writeFile(join(host, 'relay', id, 'applied.json'), JSON.stringify({ host: '127.0.0.1', port: address.port,
+          fingerprint: createHash('sha256').update(JSON.stringify({ peers: agent.record.config.peers, isolation: agent.record.config.isolation })).digest('hex') }))
+      }
       await writeFile(join(host, 'agents', `${id}.json`), JSON.stringify(agent.record))
       await writeFile(agent.briefing, `## 最近在做什么\n${name} 的第一版简报`)
       const owner = createServer((req, res) => {
@@ -86,7 +108,8 @@ export async function startPortal(agentCount = 2) {
     child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
       "import { serve } from './src/server.ts'; console.log('PORT=' + await serve());"], {
       cwd: fileURLToPath(new URL('../..', import.meta.url)),
-      env: { ...process.env, A2A_HOST_HOME: host, DSH_HOME: join(root, 'dsh'), A2A_HOST_PORT: '0' },
+      env: { ...process.env, A2A_HOST_HOME: host, DSH_HOME: join(root, 'dsh'), A2A_HOST_PORT: '0',
+        A2A_RELAY_DEFAULT_HOST: options.relayOrigin ?? '', A2A_RELAY_ALLOW_LOOPBACK_HTTP: options.relayOrigin ? '1' : '0' },
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     })
     const processUnderTest = child

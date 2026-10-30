@@ -6,8 +6,20 @@ settings:
 
 importers:
 
+  packages/a2a-connector:
+    dependencies:
+      '@talk2myagent/a2a-relay-protocol':
+        specifier: workspace:*
+        version: link:../a2a-relay-protocol
+      ws:
+        specifier: ^8.18.3
+        version: 8.22.0
+
   packages/a2a-host:
     dependencies:
+      '@talk2myagent/a2a-connector':
+        specifier: workspace:*
+        version: link:../a2a-connector
       yaml:
         specifier: ^2.5.1
         version: 2.9.1
@@ -42,6 +54,8 @@ importers:
       vite:
         specifier: ^5.4.10
         version: 5.4.10(@types/node@22.20.5)
+
+  packages/a2a-relay-protocol: {}
 
   packages/a2a-skill: {}
 
@@ -821,6 +835,18 @@ packages:
       terser:
         optional: true
 
+  ws@8.22.0:
+    resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
@@ -1449,6 +1475,8 @@ snapshots:
     optionalDependencies:
       '@types/node': 22.20.5
       fsevents: 2.3.3
+
+  ws@8.22.0: {}
 
   yallist@3.1.1: {}
 

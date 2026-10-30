@@ -57,6 +57,8 @@ function resolveContact(name) {
 
 async function rpc(url, token, method, params) {
   const response = await fetch(url, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(90_000),
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -93,10 +95,18 @@ function renderTask(task) {
   if (text.length > 0) console.log(text)
 }
 
-async function fetchCard(url, token) {
-  // The card lives at the origin's well-known path, public by default.
-  const origin = new URL(url).origin
-  const response = await fetch(`${origin}/.well-known/agent-card.json`, {
+function httpUrl(value) {
+  const u = new URL(value)
+  if (!['https:', 'http:'].includes(u.protocol) || u.username || u.password || u.search || u.hash) fail('URL must be HTTP(S) without credentials, query or fragment')
+  return u
+}
+async function fetchCard(url, token, explicitCardUrl) {
+  const rpcUrl = httpUrl(url)
+  const inferred = new URL(rpcUrl.pathname.endsWith('/a2a') ? rpcUrl.pathname.slice(0, -4) + '/.well-known/agent-card.json' : '/.well-known/agent-card.json', rpcUrl.origin)
+  const cardUrl = explicitCardUrl ? httpUrl(explicitCardUrl) : inferred
+  if (cardUrl.origin !== rpcUrl.origin) fail('Card URL must use the same origin as the RPC URL')
+  const response = await fetch(cardUrl, {
+    redirect: 'error', signal: AbortSignal.timeout(15_000),
     headers: { authorization: `Bearer ${token}` },
   })
   if (!response.ok) fail(`could not fetch the agent card (HTTP ${String(response.status)})`)
@@ -117,19 +127,29 @@ if (command === 'list') {
     console.log(`${name}\n  ${note ?? ''}\n  ${url}  令牌环境变量: ${String(tokenEnv)}`)
   }
 } else if (command === 'add') {
+  const flag = rest.indexOf('--card-url')
+  let cardUrl
+  if (flag >= 0) {
+    cardUrl = rest[flag + 1]
+    if (!cardUrl || rest.indexOf('--card-url', flag + 1) >= 0) fail('--card-url requires one URL')
+    rest.splice(flag, 2)
+  }
   const [name, url, tokenEnv, ...noteParts] = rest
   if (name === undefined || url === undefined || tokenEnv === undefined) {
     fail('usage: a2a add <name> <url> <tokenEnv> [note]')
   }
+  if (['__proto__','prototype','constructor'].includes(name) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(tokenEnv)) fail('Invalid contact name or token environment variable')
+  const rpcUrl = httpUrl(url)
+  if (cardUrl && httpUrl(cardUrl).origin !== rpcUrl.origin) fail('Card URL must use the same origin as the RPC URL')
   const contacts = loadContacts()
-  contacts.agents[name] = { url, token_env: tokenEnv, note: noteParts.join(' ') || undefined }
+  contacts.agents[name] = { url, token_env: tokenEnv, note: noteParts.join(' ') || undefined, ...(cardUrl ? { card_url: cardUrl } : {}) }
   saveContacts(contacts)
   console.log(`已保存联系人 ${name} → ${url}（令牌环境变量 ${tokenEnv}）。别忘了设置该环境变量。`)
 } else if (command === 'card') {
   const [name] = rest
   if (name === undefined) fail('usage: a2a card <name>')
   const { contact, token } = resolveContact(name)
-  const card = await fetchCard(contact.url, token)
+  const card = await fetchCard(contact.url, token, contact.card_url)
   const skills = (card.skills ?? []).map(skill => `${skill.name}: ${skill.description ?? ''}`).join('; ')
   console.log(`${card.name ?? name}\n${card.description ?? ''}${skills.length > 0 ? `\n能力: ${skills}` : ''}`)
 } else if (command === 'send') {
@@ -149,7 +169,8 @@ if (command === 'list') {
   if (name === undefined || taskId === undefined) fail('usage: a2a task <name> <taskId>')
   const { contact, token } = resolveContact(name)
   const result = await rpc(contact.url, token, 'GetTask', { id: taskId })
-  renderTask(result.task)
+  // GetTask returns a Task directly; accept older servers that wrap it too.
+  renderTask(result.task ?? result)
 } else {
   console.error('a2a — call other agents over A2A, from your contact book.')
   console.error('usage: a2a list | add <name> <url> <tokenEnv> [note] | card <name> | send <name> <text> [--nowait] | task <name> <taskId>')

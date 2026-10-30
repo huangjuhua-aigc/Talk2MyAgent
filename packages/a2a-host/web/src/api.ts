@@ -1,6 +1,9 @@
 /** Typed wrappers over the console CLI's /api. */
 
 import type { DetectResult, HandoffSnapshot, MonitorSnapshot, WizardConfig } from '../../src/types.ts'
+import type { PublicationStatus } from '@talk2myagent/a2a-connector'
+let session: Promise<{ csrfToken: string; defaultRelayHost: string }> | undefined
+const localSession = () => session ??= get<{ csrfToken: string; defaultRelayHost: string }>('/api/session').catch(error => { session = undefined; throw error })
 
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(path)
@@ -11,10 +14,10 @@ async function get<T>(path: string): Promise<T> {
 async function post<T>(path: string, body?: unknown, method = 'POST'): Promise<T> {
   const response = await fetch(path, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-a2a-csrf': (await localSession()).csrfToken },
     body: JSON.stringify(body ?? {}),
   })
-  if (!response.ok) throw new Error(`请求失败（HTTP ${response.status}）`)
+  if (!response.ok) { const detail = await response.json().catch(() => ({})) as { error?: string }; throw new Error(detail.error ?? `请求失败（HTTP ${response.status}）`) }
   return await response.json() as T
 }
 
@@ -43,6 +46,10 @@ export interface PreviewResult {
 }
 
 export const api = {
+  session: localSession,
+  publication: (id: string) => get<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/status`),
+  setPublication: (id: string, config: { enabled: boolean; provider: 'default' | 'custom'; host: string }) => post<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/config`, config, 'PUT'),
+  invitation: (id: string, peerName: string) => post<{ text: string }>(`/api/agents/${encodeURIComponent(id)}/publication/invitation`, { peerName }),
   detect: () => get<DetectResult>('/api/detect'),
   agents: () => get<AgentSummary[]>('/api/agents'),
   agent: (id: string) => get<AgentDetail>(`/api/agents/${encodeURIComponent(id)}`),

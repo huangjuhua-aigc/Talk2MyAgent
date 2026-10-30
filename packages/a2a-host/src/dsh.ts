@@ -98,6 +98,7 @@ export class DshRunner {
     // logs under ~/.dsh/logs/.
     const child = spawn(command, args, {
       shell: process.platform === 'win32',
+      windowsHide: true,
       detached: true,
       stdio: 'ignore',
     })

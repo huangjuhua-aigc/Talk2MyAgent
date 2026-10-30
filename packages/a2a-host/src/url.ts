@@ -8,7 +8,8 @@
 import type { WizardConfig } from './types.ts'
 
 /** Historical network modes collapse onto the current two. */
-export function normalizeNetworkMode(value: string | undefined): 'lan' | 'custom' {
+export function normalizeNetworkMode(value: string | undefined): 'lan' | 'custom' | 'relay' {
+  if (value === 'relay') return 'relay'
   return value === 'custom' || value === 'tailscale' || value === 'cloudflared' ? 'custom' : 'lan'
 }
 
@@ -17,6 +18,7 @@ export function normalizeNetworkMode(value: string | undefined): 'lan' | 'custom
  * control their own port; a bare host uses the configured local port.
  */
 export function derivedPublicUrl(network: WizardConfig['network'], fallbackHost?: string): string | undefined {
+  if (network.mode === 'relay') return undefined
   const host = network.host?.trim() || network.publicUrl?.trim() || fallbackHost
   if (!host) return undefined
   const full = host.includes('://')
@@ -38,6 +40,7 @@ export function resolveBindHost(network: WizardConfig['network'], lanIps: readon
     if (!['127.0.0.1', '::1', '0.0.0.0', '::', ...lanIps].includes(network.bindHost)) throw new Error('指定的监听地址不在本机，请更新配置')
     return network.bindHost
   }
+  if (network.mode === 'relay') return '127.0.0.1'
   const host = network.host?.trim().replace(/^\[|\]$/g, '')
   const literal = host !== undefined && (/^\d+(?:\.\d+){3}$/.test(host) || host.includes(':') && /^[0-9a-f:]+$/i.test(host))
   if (normalizeNetworkMode(network.mode) === 'custom' && !literal) return '127.0.0.1'
