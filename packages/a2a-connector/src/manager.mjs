@@ -1,5 +1,5 @@
-import { createHash, randomBytes } from 'node:crypto'
-import { mkdir, readFile, writeFile, realpath } from 'node:fs/promises'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { mkdir, readFile, writeFile, realpath, rename } from 'node:fs/promises'
 import { join, resolve, dirname, relative, isAbsolute, sep } from 'node:path'
 import { request } from 'node:http'
 import { spawn } from 'node:child_process'
@@ -60,4 +60,20 @@ export async function status(dir) {
       cloudSyncPending: s.cloudSyncPending, relayOrigin: s.config?.relayOrigin, error: s.desiredEnabled ? 'Connector 未运行，开启发布可恢复' : undefined } } catch (e) { if (e.code !== 'ENOENT') throw e }
     return { state: 'unregistered', desiredEnabled: false, cloudSyncPending: false }
   }
+}
+/**
+ * Forget the relay device identity so the next publish registers from scratch.
+ * Works whether or not the daemon is running; refuses while publishing is enabled.
+ */
+export async function resetIdentity(dir) {
+  dir = resolve(dir)
+  try { return await command(dir, 'reset') } catch (e) { if (!['ENOENT','ECONNREFUSED'].includes(e.code)) throw e }
+  const path = join(dir, 'state.json')
+  let saved
+  try { saved = JSON.parse(await readFile(path, 'utf8')) } catch (e) { if (e.code === 'ENOENT') return { state: 'unregistered', desiredEnabled: false, cloudSyncPending: false }; throw e }
+  if (saved.desiredEnabled) throw new Error('请先关闭发布，再重置 Relay 身份')
+  const next = { ...saved, registrations: {}, cloudSyncPending: false, revision: 0, operationId: randomUUID() }
+  const tmp = join(dir, 'state.tmp')
+  await writeFile(tmp, JSON.stringify(next), { mode: 0o600 }); await rename(tmp, path)
+  return { state: 'unregistered', desiredEnabled: false, cloudSyncPending: false, relayOrigin: next.config?.relayOrigin }
 }

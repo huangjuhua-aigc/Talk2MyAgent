@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { networkInterfaces } from 'node:os'
 import { createHash } from 'node:crypto'
-import { assertPrivateDirectory, configure, setEnabled, status, type PublicationStatus } from '@talk2myagent/a2a-connector'
+import { assertPrivateDirectory, configure, resetIdentity, setEnabled, status, type PublicationStatus } from '@talk2myagent/a2a-connector'
 import { hostHome } from './paths.ts'
 import { listAgents, type AgentRecord } from './files.ts'
 import { resolveBindHost } from './url.ts'
@@ -29,6 +29,11 @@ async function runtime(record: AgentRecord): Promise<Runtime | undefined> {
   try { return JSON.parse(await readFile(runtimePath(record.id), 'utf8')) as Runtime } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; return undefined }
 }
 export async function publicationStatus(id: string): Promise<PublicationStatus> { return await status(publicationDir(id)) }
+/** Forget the relay device identity; the next publish gets a new public address. */
+export async function resetPublicationIdentity(id: string): Promise<PublicationStatus> {
+  await stopPublication(id)
+  return await resetIdentity(publicationDir(id))
+}
 export async function stopPublication(id: string): Promise<void> {
   const s = await publicationStatus(id)
   if (s.state !== 'unregistered') await setEnabled(publicationDir(id), false)

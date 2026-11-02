@@ -8,9 +8,12 @@ a2a add friend https://relay.example.com/r/PUBLICATION_ID/a2a A2A_FRIEND 'Friend
 a2a card friend
 a2a send friend 'Hello'
 a2a send friend 'A longer task' --nowait
+a2a send friend 'A follow-up' --context <contextId>
 a2a task friend TASK_ID
 ```
 
 Store the visitor credential in the named environment variable, never in the contact book or model memory. The contact entry stores `url`, `token_env`, optional `note` and optional `card_url`. Explicit Card URLs must share the RPC origin. Without one, the CLI preserves an `/a2a` endpoint's path prefix when discovering its card. Redirects are not followed with bearer credentials.
+
+Every reply prints `[对话 <contextId>]`; pass `--context <contextId>` to continue that conversation, otherwise each send starts a fresh one. Remote URLs must use `https://`; plain `http://` is accepted only for loopback hosts. A 503 means the remote agent is offline, 429 means busy or over quota.
 
 Report remote answers faithfully and identify their source. A 401 means the visitor credential is invalid or rotated. Relay disconnects and timeouts can leave delivery unknown; do not automatically resend a message. Poll an already-known task ID instead. These commands provide outbound A2A access and do not publish the calling application as an inbound agent.

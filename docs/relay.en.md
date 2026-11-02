@@ -21,3 +21,7 @@ Private credentials live under `~/.a2a/relay/<agentId>` and cannot overlap any v
 For headless use, run `pnpm --filter @talk2myagent/a2a-host start publish AGENT_ID`, `publication AGENT_ID` or `unpublish AGENT_ID`. Configure a default host through the environment or save a custom host in Portal. See [Connector CLI](../packages/a2a-connector/README.md) for publishing another compatible native HTTP A2A agent.
 
 Set `A2A_RELAY_SOURCE` to an installed independent Relay checkout, then run Connector's `test:integration` and host's `test:all`. Tests use temporary homes, real HTTP/WS, the background process and headless browser automation. Deterministic replies avoid paid-model calls. A separate dsh-a2a integration test exercises the real harness and A2A protocol through the Relay. Production DNS, TLS proxy and cross-network reachability require deployment acceptance testing.
+
+## Self-heal and resetting the relay identity
+
+A relay 401 (unknown device credential, e.g. relay data loss) triggers one automatic re-registration with a new public address. A 409 caused by a stale local revision is re-synced once from the relay. A 403 (revoked/expired) still blocks. To reset by hand, turn publishing off and click “重置 Relay 身份”, or run `a2a-connector reset --state <dir>`; configuration is kept, old addresses and invitations stop working.

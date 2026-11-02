@@ -55,6 +55,13 @@ export function PublicationCard({ detail, onChanged }: { detail: AgentDetail; on
       try { setStatus(await api.publication(detail.id)) } catch { /* Keep the useful action error. */ }
     } finally { setBusy(false) }
   }
+  const resetIdentity = async () => {
+    if (!window.confirm('重置后会生成新的公网地址，旧地址和已发出的邀请将失效。确定重置 Relay 身份吗？')) return
+    setBusy(true); setError(''); setText(''); setCopied(false); setAddressCopied(false)
+    try { setStatus(await api.resetPublication(detail.id)); onChanged() }
+    catch (e) { setError(message(e)) }
+    finally { setBusy(false) }
+  }
   const copyInvitation = async () => {
     setBusy(true); setError(''); setCopied(false)
     try {
@@ -96,6 +103,10 @@ export function PublicationCard({ detail, onChanged }: { detail: AgentDetail; on
         <span className="small muted">{status?.desiredEnabled ? '关闭发布后，本地 Agent 仍会继续运行。' : provider === 'default' && !defaultHost ? '没有默认服务？选择上方的自定义 Relay。' : '请先启动本地 Agent，再开启发布。'}</span>
       </div>
       <p className="field-note">关闭管理页不影响连接；电脑和本地 Agent 需要保持运行。</p>
+      {status && !status.desiredEnabled && status.state !== 'unregistered' ? <div className="row">
+        <button className="quiet" disabled={busy} onClick={() => { void resetIdentity() }}>重置 Relay 身份</button>
+        <span className="small muted">Relay 数据丢失或一直显示“发布被拒绝”时使用；会生成新的公网地址。</span>
+      </div> : null}
     </div>
     {error ? <p role="alert">{error}</p> : null}
     {status?.error ? <p className="field-note">{status.error}</p> : null}

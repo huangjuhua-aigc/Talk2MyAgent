@@ -13,6 +13,7 @@ node packages/a2a-connector/src/cli.mjs publish \
   --shared-root /data/shared --name 'My agent'
 node packages/a2a-connector/src/cli.mjs status --state /private/connector/my-agent
 node packages/a2a-connector/src/cli.mjs stop --state /private/connector/my-agent
+node packages/a2a-connector/src/cli.mjs reset --state /private/connector/my-agent   # after stop: forget the relay identity
 ```
 
 Repeat `--shared-root` for every visitor-readable root; the private directory must not overlap any root. Use a directory owned by the current OS user. Local targets must use literal loopback or local-interface IPs, with fixed paths; DNS targets, redirects and arbitrary remote paths are rejected. Loopback HTTP relay development requires `--allow-loopback-http`.
@@ -20,6 +21,8 @@ Repeat `--shared-root` for every visitor-readable root; the private directory mu
 The manager starts one detached process per state directory. Control uses an authenticated named pipe on Windows or a mode-0600 Unix socket; process ownership is acquired before opening the socket. Closing Portal/CLI leaves forwarding running. `stop` closes forwarding and persists the intent but keeps the small private control process available; `shutdown` also exits that process. There is no OS boot service. The next Portal/CLI start can recover a stopped/crashed daemon, while a live daemon retries network failures itself. Stale lock recovery fails closed if the recorded PID belongs to a live process; a leftover `lock-recovery` directory after a crash requires inspecting the owner before manually removing that empty directory.
 
 State contains origin-scoped device secrets and a private IPC credential, never copy it into visitor workspaces or invitations. HTTP APIs never return these secrets. Registration intent is durable before network access; reconnect uses the existing registration. Delivery is not exactly-once: a dropped response can mean that the local task was accepted. No automatic request replay occurs.
+
+Self-heal and reset: if the relay answers 401 (it no longer knows the device credential, e.g. its database was lost), the connector drops the cached endpoints and re-registers once with the same secret, which yields a new public address. A 409 on registration (identity conflict) mints a fresh identity once; a 409 on the publish intent (stale local revision, e.g. a restored `state.json`) adopts the relay revision and replays the local intent once. 403 (revoked/expired) still stops as `blocked`. Transient errors keep the existing exponential backoff. To start over by hand, run `stop` then `reset` (or `resetIdentity(dir)` from the manager API; Portal: “重置 Relay 身份” in the 公网中继 card, `POST /api/agents/:id/publication/reset`). Reset works with or without a running daemon, refuses while publishing is enabled, keeps the relay/local configuration, and makes old addresses and invitations stop working.
 
 ```sh
 pnpm --filter @talk2myagent/a2a-connector test

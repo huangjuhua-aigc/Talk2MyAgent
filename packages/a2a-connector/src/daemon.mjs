@@ -71,6 +71,14 @@ async function action(body) {
     connector = undefined; current = { state: 'stopped' }; await save(); return snapshot()
   }
   if (body.action === 'enable' && typeof body.enabled === 'boolean') { await enable(body.enabled); return snapshot() }
+  if (body.action === 'reset') {
+    // Forget every relay device identity (all origins). The next publish registers a new
+    // publication with a new public URL; the old one stops answering. Config is kept.
+    if (state.desiredEnabled) throw new Error('请先关闭发布，再重置 Relay 身份')
+    connector?.stop(); connector = undefined
+    state.registrations = {}; state.cloudSyncPending = false; state.revision = 0; state.operationId = randomUUID()
+    current = { state: 'unregistered' }; await save(); return snapshot()
+  }
   if (body.action === 'shutdown') {
     if (state.config) await enable(false)
     stopping = true; setImmediate(() => { void shutdown() }); return snapshot()

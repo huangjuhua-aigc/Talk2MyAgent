@@ -6,3 +6,4 @@ export function ensureDaemon(dir: string): Promise<PublicationStatus>;
 export function setEnabled(dir: string, enabled: boolean): Promise<PublicationStatus>;
 export function status(dir: string): Promise<PublicationStatus>;
 export function command(dir: string, action: string, data?: object): Promise<PublicationStatus>;
+export function resetIdentity(dir: string): Promise<PublicationStatus>;

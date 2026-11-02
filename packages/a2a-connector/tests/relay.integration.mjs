@@ -2,12 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, rm, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { Connector, control } from '../src/connector.mjs'
-import { configure, setEnabled, status, command, ensureDaemon } from '../src/manager.mjs'
+import { configure, setEnabled, status, command, ensureDaemon, resetIdentity } from '../src/manager.mjs'
 if (!process.env.A2A_RELAY_SOURCE) throw new Error('Set A2A_RELAY_SOURCE to the independent Relay repository')
 const { createRelay } = await import(pathToFileURL(join(process.env.A2A_RELAY_SOURCE, 'src/server.mjs')))
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -126,4 +126,69 @@ test('changing Relay host creates an origin-scoped identity and never forwards o
     await assert.rejects(control(b.config.relayOrigin,'/v1/publication',credentialA),e=>e.status===401)
     assert.equal(Object.keys(state.registrations).length,2)
   } finally {one.stop();two?.stop();await a.close();await b.close()}
+})
+
+test('relay database loss: 401 drops cached endpoints and re-registers instead of blocking', async () => {
+  const f=await fixture(), state={registrations:{},desiredEnabled:true,revision:1,operationId:randomUUID()}
+  let current
+  const c=new Connector({config:f.config,state,save:async()=>{},onStatus:s=>{current=s}})
+  try {
+    void c.start(); await until(()=>current?.state==='online')
+    const before=current.publicRpcUrl, token=state.registrations[f.config.relayOrigin].token
+    f.relay.store.db.exec('DELETE FROM agents')
+    for (const s of f.relay.sessions.values()) s.ws.terminate()
+    await until(()=>current?.state==='online' && current.publicRpcUrl!==before)
+    assert.equal(state.registrations[f.config.relayOrigin].token,token)
+    assert.equal((await fetch(current.publicCardUrl)).status,200)
+  } finally {c.stop(); await f.close()}
+})
+
+test('stale local revision (409) re-syncs with the relay revision instead of blocking', async () => {
+  const f=await fixture(), state={registrations:{},desiredEnabled:true,revision:1,operationId:randomUUID()}
+  let current
+  const one=new Connector({config:f.config,state,save:async()=>{},onStatus:s=>{current=s}})
+  let two
+  try {
+    void one.start(); await until(()=>current?.state==='online'); one.stop()
+    f.relay.store.db.exec('UPDATE agents SET revision=10')
+    state.revision=2; state.operationId=randomUUID(); state.cloudSyncPending=true
+    two=new Connector({config:f.config,state,save:async()=>{},onStatus:s=>{current=s}})
+    void two.start(); await until(()=>current?.state==='online')
+    assert.equal(state.revision,11); assert.equal(state.cloudSyncPending,false)
+    const row=f.relay.store.db.prepare('SELECT revision, enabled FROM agents').get()
+    assert.equal(row.revision,11); assert.equal(row.enabled,1)
+  } finally {one.stop(); two?.stop(); await f.close()}
+})
+
+test('a revoked publication (403) still blocks; heal is limited to unknown credentials', async () => {
+  const f=await fixture(), state={registrations:{},desiredEnabled:true,revision:1,operationId:randomUUID()}
+  let current
+  const c=new Connector({config:f.config,state,save:async()=>{},onStatus:s=>{current=s}})
+  try {
+    void c.start(); await until(()=>current?.state==='online')
+    f.relay.revoke(current.publicationId)
+    await until(()=>current?.state==='blocked')
+    assert.ok(state.registrations[f.config.relayOrigin].info)
+  } finally {c.stop(); await f.close()}
+})
+
+test('reset identity: refused while publishing, then a new publication with a new address', async () => {
+  const f=await fixture(), dir=await mkdtemp(join(tmpdir(),'connector-reset-'))
+  try {
+    await configure(dir,f.config); await setEnabled(dir,true)
+    await until(async()=>(await status(dir)).state==='online')
+    const first=(await status(dir)).publicRpcUrl
+    await assert.rejects(resetIdentity(dir),/关闭发布/)
+    await setEnabled(dir,false)
+    assert.equal((await resetIdentity(dir)).state,'unregistered')
+    assert.deepEqual(JSON.parse(await readFile(join(dir,'state.json'),'utf8')).registrations,{})
+    await setEnabled(dir,true); await until(async()=>(await status(dir)).state==='online')
+    assert.notEqual((await status(dir)).publicRpcUrl,first)
+    // Offline path: the daemon is not running, reset edits state.json directly.
+    await setEnabled(dir,false); await command(dir,'shutdown'); await until(async()=>!(await status(dir)).instanceId)
+    await resetIdentity(dir)
+    const saved=JSON.parse(await readFile(join(dir,'state.json'),'utf8'))
+    assert.deepEqual(saved.registrations,{}); assert.ok(saved.config)
+    assert.ok(!JSON.stringify(await status(dir)).includes('token'))
+  } finally { await command(dir,'shutdown').catch(()=>{}); await until(async()=>!(await status(dir)).instanceId).catch(()=>{}); await f.close(); await rm(dir,{recursive:true,force:true}) }
 })
