@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,6 +18,10 @@ async function withFixture(check) {
   let status = 200, mode = ''
   const server = createServer((req, res) => {
     void (async () => {
+      if (mode === 'reflect') { res.writeHead(503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: `bad header Authorization: ${req.headers.authorization}` })); return }
+      if (mode === 'reflect-nested') { res.writeHead(403, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: `token ${token} denied; Bearer other-secret-xyz` } })); return }
+      if (mode === 'rpc-reflect' && req.method === 'POST') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: `x-${token}`, message: `echo Authorization: Bearer ${token}` } })); return }
+      if (mode === 'badjson') { res.setHeader('content-type', 'application/json'); res.end(`{not json ${token} Bearer ${token}`); return }
       if (mode === 'offline') { res.writeHead(503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'Agent offline' })); return }
       if (status !== 200 || req.headers.authorization !== `Bearer ${token}`) {
         res.writeHead(status === 200 ? 401 : status); res.end('{}'); return
@@ -144,4 +148,28 @@ test('C09 relay 503 explains that the agent is offline', () => withFixture(async
     assert.ok(!error.stderr.includes(token))
     return true
   })
+}))
+
+test('C10 saved remote http contacts are refused at send time without any request', () => withFixture(async ({ root, cli, calls }) => {
+  const path = join(root, 'contacts.json')
+  const contacts = JSON.parse(await readFile(path, 'utf8'))
+  contacts.agents.legacy = { url: 'http://192.0.2.1/a2a', token_env: 'A2A_TEST_TOKEN' }
+  await writeFile(path, JSON.stringify(contacts))
+  for (const args of [['send', 'legacy', 'hi'], ['task', 'legacy', 'task-1'], ['card', 'legacy']]) {
+    await assert.rejects(cli(args), error => { assert.match(error.stderr, /https:\/\//); return true })
+  }
+  assert.equal(calls.length, 0)
+}))
+
+test('C11 reflected credentials are redacted from RPC and card errors', () => withFixture(async ({ cli, setMode }) => {
+  for (const [mode, args] of [['badjson', ['send', 'friend', 'hi']], ['badjson', ['card', 'friend']], ['rpc-reflect', ['send', 'friend', 'hi']], ['rpc-reflect', ['task', 'friend', 'task-1']], ['reflect', ['send', 'friend', 'hi']], ['reflect', ['card', 'friend']], ['reflect-nested', ['send', 'friend', 'hi']], ['reflect-nested', ['card', 'friend']]]) {
+    setMode(mode)
+    await assert.rejects(cli(args), error => {
+      assert.ok(!error.stderr.includes(token), error.stderr)
+      assert.ok(!error.stderr.includes('other-secret-xyz'), error.stderr)
+      if (mode === 'badjson') assert.match(error.stderr, /not valid JSON/)
+      else assert.match(error.stderr, /\[REDACTED\]/)
+      return true
+    })
+  }
 }))

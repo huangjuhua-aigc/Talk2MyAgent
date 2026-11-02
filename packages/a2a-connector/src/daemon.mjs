@@ -29,14 +29,15 @@ try { state = JSON.parse(await readFile(join(dir, 'state.json'), 'utf8')) } catc
 let connector, current = { state: 'stopped' }, writes = Promise.resolve(), commands = Promise.resolve(), stopping = false
 function save() {
   const text = JSON.stringify(state)
-  writes = writes.then(async () => { const tmp = join(dir, 'state.tmp'); await writeFile(tmp, text, { mode: 0o600 }); await rename(tmp, join(dir, 'state.json')) })
+  // Unique temp file; a failed write must not poison every later save.
+  writes = writes.catch(() => {}).then(async () => { const tmp = join(dir, `state.${randomUUID()}.tmp`); await writeFile(tmp, text, { mode: 0o600 }); await rename(tmp, join(dir, 'state.json')) })
   return writes
 }
 const snapshot = () => ({ ...current, instanceId, desiredEnabled: state.desiredEnabled, cloudSyncPending: state.cloudSyncPending,
   relayOrigin: state.config?.relayOrigin, localRpcUrl: state.config?.localRpcUrl, localCardUrl: state.config?.localCardUrl })
 function start() {
   connector?.stop()
-  connector = new Connector({ config: state.config, state, save, onStatus: value => { current = value } })
+  const owner = connector = new Connector({ config: state.config, state, save, onStatus: value => { if (connector === owner) current = value } })
   void connector.start()
 }
 async function enable(enabled) {
@@ -51,7 +52,8 @@ async function enable(enabled) {
   if (enabled) start()
   else {
     connector?.stop(); current = { state: 'stopped' }
-    connector ??= new Connector({ config: state.config, state, save })
+    // A fresh, un-stopped instance carries the disable to the relay (incl. stale-revision replay).
+    connector = new Connector({ config: state.config, state, save })
     try { await connector.syncIntent() } catch { /* Local forwarding is already stopped. Retry on next launch. */ }
   }
 }

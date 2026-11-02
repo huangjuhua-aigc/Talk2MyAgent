@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { mkdir, readFile, writeFile, realpath, rename } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, realpath, rename, unlink, rmdir } from 'node:fs/promises'
 import { join, resolve, dirname, relative, isAbsolute, sep } from 'node:path'
 import { request } from 'node:http'
 import { spawn } from 'node:child_process'
@@ -68,12 +68,37 @@ export async function status(dir) {
 export async function resetIdentity(dir) {
   dir = resolve(dir)
   try { return await command(dir, 'reset') } catch (e) { if (!['ENOENT','ECONNREFUSED'].includes(e.code)) throw e }
-  const path = join(dir, 'state.json')
-  let saved
-  try { saved = JSON.parse(await readFile(path, 'utf8')) } catch (e) { if (e.code === 'ENOENT') return { state: 'unregistered', desiredEnabled: false, cloudSyncPending: false }; throw e }
-  if (saved.desiredEnabled) throw new Error('请先关闭发布，再重置 Relay 身份')
-  const next = { ...saved, registrations: {}, cloudSyncPending: false, revision: 0, operationId: randomUUID() }
-  const tmp = join(dir, 'state.tmp')
-  await writeFile(tmp, JSON.stringify(next), { mode: 0o600 }); await rename(tmp, path)
-  return { state: 'unregistered', desiredEnabled: false, cloudSyncPending: false, relayOrigin: next.config?.relayOrigin }
+  // No socket does not prove no daemon: one may hold daemon.lock and be loading state.
+  // Take the daemon lock ourselves so a starting daemon and concurrent resets serialize.
+  const empty = { state: 'unregistered', desiredEnabled: false, cloudSyncPending: false }
+  try { await readFile(join(dir, 'state.json')) } catch (e) { if (e.code === 'ENOENT') return empty; throw e } // never published: nothing to forget
+  const release = await lockOffline(dir)
+  try {
+    const path = join(dir, 'state.json')
+    let saved
+    try { saved = JSON.parse(await readFile(path, 'utf8')) } catch (e) { if (e.code === 'ENOENT') return { state: 'unregistered', desiredEnabled: false, cloudSyncPending: false }; throw e }
+    if (saved.desiredEnabled) throw new Error('请先关闭发布，再重置 Relay 身份')
+    const next = { ...saved, registrations: {}, cloudSyncPending: false, revision: 0, operationId: randomUUID() }
+    const tmp = join(dir, `state.${randomUUID()}.tmp`)
+    await writeFile(tmp, JSON.stringify(next), { mode: 0o600 }); await rename(tmp, path)
+    return { state: 'unregistered', desiredEnabled: false, cloudSyncPending: false, relayOrigin: next.config?.relayOrigin }
+  } finally { await release() }
+}
+const BUSY = 'Connector 正在启动或被占用，请稍后再重置'
+async function lockOffline(dir) {
+  const lock = join(dir, 'daemon.lock'), instanceId = randomUUID()
+  const take = () => writeFile(lock, JSON.stringify({ pid: process.pid, instanceId }), { flag: 'wx', mode: 0o600 })
+  try { await take() } catch (e) {
+    if (e.code !== 'EEXIST') throw e
+    // Same stale-lock recovery protocol as the daemon.
+    const recovery = join(dir, 'lock-recovery')
+    try { await mkdir(recovery, { mode: 0o700 }) } catch (err) { if (err.code === 'EEXIST') throw new Error(BUSY); throw err }
+    try {
+      let previous
+      try { previous = JSON.parse(await readFile(lock, 'utf8')) } catch { throw new Error(BUSY) }
+      try { process.kill(previous.pid, 0); throw new Error(BUSY) } catch (err) { if (err.code !== 'ESRCH') throw err.message === BUSY ? err : new Error(BUSY) }
+      await unlink(lock); await take()
+    } finally { await rmdir(recovery) }
+  }
+  return async () => { try { if (JSON.parse(await readFile(lock, 'utf8')).instanceId === instanceId) await unlink(lock) } catch {} }
 }

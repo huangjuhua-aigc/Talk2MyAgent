@@ -57,7 +57,9 @@ function resolveContact(name) {
 }
 
 async function rpc(url, token, method, params) {
-  const response = await fetch(url, {
+  // Validate at send time too: contacts saved before HTTPS enforcement must not leak the token.
+  const target = httpUrl(url)
+  const response = await fetch(target, {
     redirect: 'error',
     signal: AbortSignal.timeout(90_000),
     method: 'POST',
@@ -69,9 +71,9 @@ async function rpc(url, token, method, params) {
     body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params }),
   })
   if (response.status === 401) fail('rejected (401): the token is wrong or was rotated')
-  if (!response.ok) fail(await httpFailure(response, 'the agent answered'))
-  const envelope = await response.json()
-  if (envelope.error !== undefined) fail(`${envelope.error.message ?? 'remote error'} (code ${String(envelope.error.code)})`)
+  if (!response.ok) fail(await httpFailure(response, 'the agent answered', token))
+  const envelope = await safeJson(response, 'the agent returned a response that is not valid JSON')
+  if (envelope.error !== undefined) fail(`${redact(envelope.error.message ?? 'remote error', token).slice(0, 500)} (code ${redact(envelope.error.code, token).slice(0, 40)})`)
   return envelope.result
 }
 
@@ -84,14 +86,25 @@ const HINTS = {
   503: '对方 agent 当前不在线（电脑或本地 agent 未运行，或已关闭公网发布）',
   504: '对方 agent 响应超时，消息可能未送达',
 }
+/** Parse JSON without letting a parser excerpt (which may echo a reflected token) reach stderr. */
+async function safeJson(response, message) {
+  try { return JSON.parse(await response.text()) } catch { fail(message) }
+}
+/** Strip control characters and any credential a server reflected back before printing. */
+function redact(text, token) {
+  let safe = String(text).replace(/[\u0000-\u001f]/g, ' ')
+  if (token) safe = safe.split(token).join('[REDACTED]')
+  return safe.replace(/\b(Bearer|Basic)\s+[^\s"',;)]+/gi, '$1 [REDACTED]')
+}
 /** Turn an HTTP failure into a readable line, quoting a short server reason when present. */
-async function httpFailure(response, prefix) {
+async function httpFailure(response, prefix, token) {
   let reason = ''
   try {
     const body = await response.text()
     const parsed = JSON.parse(body)
     const raw = typeof parsed?.error === 'string' ? parsed.error : typeof parsed?.error?.message === 'string' ? parsed.error.message : ''
-    reason = raw.replace(/[\u0000-\u001f]/g, ' ').slice(0, 200)
+    // Redact before truncating so a reflected credential can never survive partially.
+    reason = redact(raw, token).slice(0, 200)
   } catch { /* Non-JSON bodies are not echoed. */ }
   const hint = HINTS[response.status]
   return `${prefix} HTTP ${String(response.status)}${reason ? ` (${reason})` : ''}${hint ? ` — ${hint}` : ''}`
@@ -158,8 +171,8 @@ async function fetchCard(url, token, explicitCardUrl) {
     redirect: 'error', signal: AbortSignal.timeout(15_000),
     headers: { authorization: `Bearer ${token}` },
   })
-  if (!response.ok) fail(await httpFailure(response, 'could not fetch the agent card:'))
-  return await response.json()
+  if (!response.ok) fail(await httpFailure(response, 'could not fetch the agent card:', token))
+  return await safeJson(response, 'the agent card is not valid JSON')
 }
 
 const [command, ...rest] = process.argv.slice(2)
