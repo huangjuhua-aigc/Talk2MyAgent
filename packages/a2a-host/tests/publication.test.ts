@@ -37,3 +37,18 @@ test('relay mode never falls back to localhost in invitations and quotes contact
     assert.ok(!invitation.includes(config.adminToken))
   } finally { await portal.close() }
 })
+
+test('publication reset requires CSRF, turns publishing off and forgets the relay identity', async () => {
+  const portal = await startPortal(1)
+  try {
+    const base = portal.baseURL, id = portal.agents[0]!.record.id
+    assert.equal((await fetch(`${base}/api/agents/${id}/publication/reset`, { method: 'POST' })).status, 403)
+    const { csrfToken } = await (await fetch(`${base}/api/session`)).json() as { csrfToken: string }
+    const response = await fetch(`${base}/api/agents/${id}/publication/reset`, { method: 'POST', headers: { 'x-a2a-csrf': csrfToken } })
+    const text = await response.text()
+    assert.equal(response.status, 200, text)
+    const body = JSON.parse(text) as { state: string; desiredEnabled: boolean }
+    assert.equal(body.state, 'unregistered'); assert.equal(body.desiredEnabled, false)
+    assert.ok(!JSON.stringify(body).includes('token'))
+  } finally { await portal.close() }
+})

@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,9 +15,14 @@ const token = 'fixture-outbound-secret'
 async function withFixture(check) {
   const root = await mkdtemp(join(tmpdir(), 'a2a-cli-'))
   const calls = []
-  let status = 200
+  let status = 200, mode = ''
   const server = createServer((req, res) => {
     void (async () => {
+      if (mode === 'reflect') { res.writeHead(503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: `bad header Authorization: ${req.headers.authorization}` })); return }
+      if (mode === 'reflect-nested') { res.writeHead(403, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: `token ${token} denied; Bearer other-secret-xyz` } })); return }
+      if (mode === 'rpc-reflect' && req.method === 'POST') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: `x-${token}`, message: `echo Authorization: Bearer ${token}` } })); return }
+      if (mode === 'badjson') { res.setHeader('content-type', 'application/json'); res.end(`{not json ${token} Bearer ${token}`); return }
+      if (mode === 'offline') { res.writeHead(503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: 'Agent offline' })); return }
       if (status !== 200 || req.headers.authorization !== `Bearer ${token}`) {
         res.writeHead(status === 200 ? 401 : status); res.end('{}'); return
       }
@@ -35,6 +40,9 @@ async function withFixture(check) {
         status: { state: immediate ? 'TASK_STATE_WORKING' : 'TASK_STATE_COMPLETED' },
         artifacts: immediate ? [] : [{ parts: [{ text: rpc.params.message?.parts[0].text ?? '查询得到的结果' }] }],
       }
+      if (mode === 'message') {
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { message: { messageId: 'm-1', role: 'ROLE_AGENT', contextId: rpc.params.message?.contextId ?? 'context-new', parts: [{ text: '直接回复' }] } } })); return
+      }
       res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: rpc.method === 'GetTask' ? task : { task } }))
     })().catch(error => { res.writeHead(500); res.end(JSON.stringify({ error: String(error) })) })
   })
@@ -45,7 +53,7 @@ async function withFixture(check) {
       env: { ...process.env, A2A_HOME: root, A2A_TEST_TOKEN: token, ...extraEnv }, timeout: 5000, windowsHide: true,
     })
     await cli(['add', 'friend', url, 'A2A_TEST_TOKEN', '测试联系人'])
-    await check({ root, calls, cli, url, setStatus: value => { status = value } })
+    await check({ root, calls, cli, url, setStatus: value => { status = value }, setMode: value => { mode = value } })
   } finally {
     server.closeAllConnections()
     if (server.listening) await new Promise(done => server.close(done))
@@ -103,4 +111,65 @@ test('C05 keeps relay prefixes and explicit card paths; rejects cross-origin cre
   const saved = JSON.parse(await readFile(join(root,'contacts.json'),'utf8'))
   assert.equal(saved.agents.custom.card_url,`${origin}/custom-card`)
   await assert.rejects(cli(['add','bad',url,'A2A_TEST_TOKEN','--card-url','https://elsewhere.test/card']))
+}))
+
+test('C06 prints the contextId and continues a conversation with --context', () => withFixture(async ({ cli, calls }) => {
+  const first = await cli(['send', 'friend', '第一轮'])
+  assert.match(first.stdout, /\[对话 context-1\]/)
+  assert.equal(calls[0].params.message.contextId, undefined)
+  await cli(['send', 'friend', '第二轮', '--context', 'context-1'])
+  assert.equal(calls[1].params.message.contextId, 'context-1')
+  assert.equal(calls[1].params.message.parts[0].text, '第二轮')
+  await cli(['send', '--context=context-1', 'friend', '第三轮'])
+  assert.equal(calls[2].params.message.contextId, 'context-1')
+  await assert.rejects(cli(['send', 'friend', 'hi', '--context']), error => /--context requires/.test(error.stderr))
+}))
+
+test('C07 a direct message result renders instead of crashing', () => withFixture(async ({ cli, setMode }) => {
+  setMode('message')
+  const reply = await cli(['send', 'friend', '你好', '--context', 'ctx-9'])
+  assert.match(reply.stdout, /直接回复/)
+  assert.match(reply.stdout, /\[对话 ctx-9\]/)
+}))
+
+test('C08 plain http is refused for remote hosts but allowed on loopback', () => withFixture(async ({ cli }) => {
+  await assert.rejects(cli(['add', 'remote', 'http://agent.example.com/a2a', 'A2A_TEST_TOKEN']), error => /https/.test(error.stderr))
+  await assert.rejects(cli(['add', 'lan', 'http://192.168.1.10:8080/a2a', 'A2A_TEST_TOKEN']), error => /https/.test(error.stderr))
+  await cli(['add', 'local', 'http://localhost:1/a2a', 'A2A_TEST_TOKEN'])
+  await cli(['add', 'v6', 'http://[::1]:1/a2a', 'A2A_TEST_TOKEN'])
+  await cli(['add', 'secure', 'https://agent.example.com/a2a', 'A2A_TEST_TOKEN'])
+}))
+
+test('C09 relay 503 explains that the agent is offline', () => withFixture(async ({ cli, setMode }) => {
+  setMode('offline')
+  await assert.rejects(cli(['send', 'friend', 'hello']), error => {
+    assert.match(error.stderr, /HTTP 503 \(Agent offline\)/)
+    assert.match(error.stderr, /不在线/)
+    assert.ok(!error.stderr.includes(token))
+    return true
+  })
+}))
+
+test('C10 saved remote http contacts are refused at send time without any request', () => withFixture(async ({ root, cli, calls }) => {
+  const path = join(root, 'contacts.json')
+  const contacts = JSON.parse(await readFile(path, 'utf8'))
+  contacts.agents.legacy = { url: 'http://192.0.2.1/a2a', token_env: 'A2A_TEST_TOKEN' }
+  await writeFile(path, JSON.stringify(contacts))
+  for (const args of [['send', 'legacy', 'hi'], ['task', 'legacy', 'task-1'], ['card', 'legacy']]) {
+    await assert.rejects(cli(args), error => { assert.match(error.stderr, /https:\/\//); return true })
+  }
+  assert.equal(calls.length, 0)
+}))
+
+test('C11 reflected credentials are redacted from RPC and card errors', () => withFixture(async ({ cli, setMode }) => {
+  for (const [mode, args] of [['badjson', ['send', 'friend', 'hi']], ['badjson', ['card', 'friend']], ['rpc-reflect', ['send', 'friend', 'hi']], ['rpc-reflect', ['task', 'friend', 'task-1']], ['reflect', ['send', 'friend', 'hi']], ['reflect', ['card', 'friend']], ['reflect-nested', ['send', 'friend', 'hi']], ['reflect-nested', ['card', 'friend']]]) {
+    setMode(mode)
+    await assert.rejects(cli(args), error => {
+      assert.ok(!error.stderr.includes(token), error.stderr)
+      assert.ok(!error.stderr.includes('other-secret-xyz'), error.stderr)
+      if (mode === 'badjson') assert.match(error.stderr, /not valid JSON/)
+      else assert.match(error.stderr, /\[REDACTED\]/)
+      return true
+    })
+  }
 }))

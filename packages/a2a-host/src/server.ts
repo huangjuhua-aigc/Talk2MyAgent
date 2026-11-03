@@ -33,7 +33,7 @@ import { pickDirectory } from './pick.ts'
 import { agentPatchPath, agentManagementPath } from './paths.ts'
 import type { WizardConfig } from './types.ts'
 import { randomBytes } from 'node:crypto'
-import { defaultRelayHost, invitation, publicationStatus, publish, recordRuntime, stopPublication, validateSharedRoots } from './publication.ts'
+import { defaultRelayHost, invitation, publicationStatus, publish, recordRuntime, resetPublicationIdentity, stopPublication, validateSharedRoots } from './publication.ts'
 
 /** Fixed by design: the vite dev proxy expects this port. */
 const PORT = Number(process.env['A2A_HOST_PORT'] ?? 17890)
@@ -172,6 +172,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 
   if (sub === 'publication/status' && req.method === 'GET') {
     json(res, 200, await publicationStatus(id)); return
+  }
+  if (sub === 'publication/reset' && req.method === 'POST') {
+    const updated: AgentRecord = record.config.network.relay?.enabled
+      ? { ...record, config: { ...record.config, network: { ...record.config.network, relay: { ...record.config.network.relay, enabled: false } } }, updatedAt: new Date().toISOString() }
+      : record
+    if (updated !== record) await saveAgent(updated)
+    json(res, 200, await resetPublicationIdentity(id)); return
   }
   if (sub === 'publication/invitation' && req.method === 'POST') {
     const body = await readBody(req) as { peerName: string }

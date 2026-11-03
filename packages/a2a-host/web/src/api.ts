@@ -49,6 +49,7 @@ export const api = {
   session: localSession,
   publication: (id: string) => get<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/status`),
   setPublication: (id: string, config: { enabled: boolean; provider: 'default' | 'custom'; host: string }) => post<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/config`, config, 'PUT'),
+  resetPublication: (id: string) => post<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/reset`, {}),
   invitation: (id: string, peerName: string) => post<{ text: string }>(`/api/agents/${encodeURIComponent(id)}/publication/invitation`, { peerName }),
   detect: () => get<DetectResult>('/api/detect'),
   agents: () => get<AgentSummary[]>('/api/agents'),

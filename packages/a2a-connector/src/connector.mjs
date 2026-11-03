@@ -46,22 +46,34 @@ export class Connector {
     this.config = { ...config, relayOrigin: originOf(config.relayOrigin, config.allowHttp) }
     localTarget(config.localRpcUrl); localTarget(config.localCardUrl)
     if (new URL(config.localRpcUrl).origin !== new URL(config.localCardUrl).origin) throw new Error('Local RPC and Agent Card must use the same origin')
-    this.state = state; this.save = save; this.onStatus = onStatus; this.stopped = false; this.flows = new Map(); this.attempt = 0
+    this.state = state; this.save = save; this.onStatus = onStatus; this.stopped = false; this.flows = new Map(); this.attempt = 0; this.heals = { endpoint: 0, identity: 0 }
   }
-  status(state, error) { this.onStatus({ state, ...(error ? { error } : {}), ...(this.registration?.info ?? {}), relayOrigin: this.config.relayOrigin }) }
+  status(state, error) { if (this.stopped && state !== 'stopped') return; this.onStatus({ state, ...(error ? { error } : {}), ...(this.registration?.info ?? {}), relayOrigin: this.config.relayOrigin }) }
   async register() {
+    if (this.stopped) throw Object.assign(new Error('Connector stopped'), { stopped: true })
     const origin = this.config.relayOrigin
     let registration = this.state.registrations[origin]
     if (!registration) {
       registration = { registrationId: randomUUID(), token: randomBytes(32).toString('hex') }
       this.state.registrations[origin] = registration
       await this.save() // Persist the secret before the first network write; retries recover the same identity.
+      if (this.stopped) throw Object.assign(new Error('Connector stopped'), { stopped: true })
     }
     this.registration = registration
     if (!registration.info) {
       this.status('registering')
-      const info = await control(origin, '/v1/agents/register', undefined, 'POST', { registrationId: registration.registrationId,
+      let info
+      try {
+        info = await control(origin, '/v1/agents/register', undefined, 'POST', { registrationId: registration.registrationId,
         deviceTokenHash: createHash('sha256').update(registration.token).digest('hex'), displayName: this.config.displayName, protocolVersion: '1.0' })
+      } catch (error) {
+        // 409 here means the relay holds this registrationId under another credential
+        // (e.g. a restored backup); mint a fresh identity once instead of blocking forever.
+        if (error?.status === 409) error.heal = 'identity'
+        throw error
+      }
+      // A stop/reset may have happened during the network call: never write into reset state.
+      if (this.stopped || this.state.registrations[origin] !== registration) throw Object.assign(new Error('Connector stopped'), { stopped: true })
       const expected = `/r/${info.publicationId}`
       if (!/^[a-zA-Z0-9_-]{16,80}$/.test(info.publicationId) || info.publicRpcUrl !== `${origin}${expected}/a2a` ||
           info.publicCardUrl !== `${origin}${expected}/.well-known/agent-card.json` || info.connectUrl !== `${origin.replace(/^http/, 'ws')}/v1/connect`) throw new Error('Relay returned inconsistent endpoints')
@@ -69,14 +81,30 @@ export class Connector {
     }
     return registration
   }
-  async syncIntent() {
+  async syncIntent(replayed = false) {
     const r = this.registration ?? this.state.registrations[this.config.relayOrigin]
     if (!r?.info) return
     const revision = this.state.revision, enabled = this.state.desiredEnabled, operationId = this.state.operationId
-    await control(this.config.relayOrigin, '/v1/publication/enabled', r.token, 'PUT', { enabled, revision, operationId })
+    try {
+      await control(this.config.relayOrigin, '/v1/publication/enabled', r.token, 'PUT', { enabled, revision, operationId })
+    } catch (error) {
+      if (error?.status !== 409 || replayed) throw error
+      // Stale local revision (restored state.json, relay-side newer intent): adopt the relay's
+      // revision, mint a fresh operation and replay the local desire exactly once.
+      const remote = await control(this.config.relayOrigin, '/v1/publication', r.token)
+      if (this.stopped) return
+      if (!Number.isSafeInteger(remote?.revision)) throw error
+      if (this.state.revision !== revision || this.state.operationId !== operationId) return
+      this.state.revision = Math.max(this.state.revision, remote.revision) + 1
+      this.state.operationId = randomUUID()
+      await this.save()
+      if (this.stopped) return // a stop/reset during the save wins; never replay into reset state
+      return await this.syncIntent(true)
+    }
     if (this.state.revision === revision && this.state.operationId === operationId) { this.state.cloudSyncPending = false; await this.save() }
   }
   async start() {
+    if (this.stopped) return
     this.status('starting')
     try {
       await this.register()
@@ -91,7 +119,26 @@ export class Connector {
     } catch (error) { this.retry(error) }
   }
   retry(error) {
-    if (this.stopped) return
+    if (this.stopped || error?.stopped) return
+    const r = this.state.registrations[this.config.relayOrigin]
+    // Separate one-shot budgets per online cycle: endpoint refresh (401) and identity rebuild
+    // (registration 409), so 401 -> re-register -> 409 -> new identity still recovers, while a
+    // hostile relay cannot make us loop.
+    const kind = error?.heal === 'identity' ? 'identity' : error?.status === 401 ? 'endpoint' : undefined
+    if (kind && r && this.heals[kind] < 1) {
+      this.heals[kind]++
+      if (kind === 'identity') delete this.state.registrations[this.config.relayOrigin]
+      else delete r.info
+      this.registration = undefined
+      this.status('reconnecting', 'Relay 不认识当前设备凭据，正在重新注册')
+      clearTimeout(this.retryTimer)
+      this.retryTimer = setTimeout(() => {
+        void (async () => {
+          try { await this.save(); if (this.stopped) return; await this.start() } catch (e) { this.retry(e) }
+        })()
+      }, 50)
+      return
+    }
     if ([401,403,409].includes(error?.status)) { this.status('blocked', 'Relay 拒绝设备凭据或发布意图，请检查服务端状态'); return }
     this.status('reconnecting', error?.message ?? 'Connector disconnected')
     clearTimeout(this.retryTimer)
@@ -130,7 +177,7 @@ export class Connector {
           void wire(ws, session, { type: 'ready' }).catch(() => ws.terminate()); return
         }
         if (!session || !sameSession(m, session)) throw new Error('Session mismatch')
-        if (m.type === 'ready_ack' && !online) { online = true; this.attempt = 0; this.status('online'); return }
+        if (m.type === 'ready_ack' && !online) { online = true; this.attempt = 0; this.heals = { endpoint: 0, identity: 0 }; this.status('online'); return }
         if (!online) throw new Error('Not ready')
         if (m.type === 'request_begin') {
           if (this.flows.has(m.requestId) || this.flows.size >= LIMIT.concurrent || !['card','rpc'].includes(m.route) ||
