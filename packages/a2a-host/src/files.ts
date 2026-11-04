@@ -9,7 +9,7 @@
  * @module a2a-host/files
  */
 
-import { mkdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, copyFile, rm, rename } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { parse, stringify } from 'yaml'
@@ -22,6 +22,7 @@ import {
   agentConfigPath,
   agentPatchPath,
   agentBriefingPath,
+  agentWorkspacesPath,
   agentManagementPath,
   agentsHome,
   credentialsPath,
@@ -47,7 +48,7 @@ export const adminRefFor = (id: string): string =>
  * A visitor token's credential reference on the HOST side, unique per agent:
  * two agents can each have their own visitor "alice" without clobbering
  * each other's token. (The VISITOR side keeps its own naming — see the
- * wizard's instruction, which uses plain A2A_PEER_<NAME> on their machine.)
+ * wizard's instruction, which uses A2A_PEER_<CONTACT_ID> on their machine.)
  */
 export const refForPeer = (agentId: string, peer: string): string =>
   `A2A_PEER_${agentId.toUpperCase().replace(/-/g, '_')}_${peer.toUpperCase().replace(/-/g, '_')}`
@@ -95,11 +96,12 @@ function patchRows(config: WizardConfig, adminRef: string, agentId: string): Rec
         // The plugin exposes only its scoped read_file; other tools stay denied.
         trustedPeers: config.peers.filter(peer => peer.trusted).map(peer => peer.name),
         isolation: {
-          // The wizard always isolates per visitor; a shared workspace remains
-          // a hand-written-config capability of the plugin.
+          // Runtime workspaces are always private, outside the public data root.
           workspaceMode: 'per-peer',
           workspaceRoot: config.isolation.workspaceRoot,
           peerWorkspaces: config.isolation.peerWorkspaces,
+          privateRoot: agentWorkspacesPath(agentId),
+          execution: 'microsandbox',
         },
         // The opening briefing is always on — it is the product's premise,
         // not a deployment decision.
@@ -193,7 +195,7 @@ export async function writeCredentials(entries: Record<string, string>): Promise
   const refs = typeof current['refs'] === 'object' && current['refs'] !== null
     ? current['refs'] as Record<string, unknown>
     : {}
-  await writeText(path, stringify({ ...current, refs: { ...refs, ...entries } }))
+  await writeText(path, stringify({ ...current, version: 1, refs: { ...refs, ...entries } }))
 }
 
 /** The launch command for the native (non-Docker) mode, for display and spawn. */
@@ -223,20 +225,41 @@ export function launchCommand(
   }
 }
 
-/**
- * Persist one agent: its record, its overlay patch, and its credentials
- * entries.
- */
-export async function saveAgent(record: AgentRecord): Promise<string[]> {
-  const adminRef = adminRefFor(record.id)
-  const written: string[] = []
-  await writeText(agentPatchPath(record.id), buildPatchYaml(record.config, adminRef, record.id))
-  written.push(agentPatchPath(record.id))
-  await writeCredentials(buildCredentialEntries(record.config, adminRef, record.id))
-  written.push(credentialsPath())
-  await writeText(agentConfigPath(record.id), JSON.stringify(record, null, 2))
-  written.push(agentConfigPath(record.id))
-  return written
+// Keep record saves ordered across the local Portal's agents.
+let recordsPending: Promise<unknown> = Promise.resolve()
+function withRecords<T>(work: () => Promise<T>): Promise<T> {
+  const result = recordsPending.then(work)
+  recordsPending = result.catch(() => {})
+  return result
+}
+
+async function readAgentRecord(id: string): Promise<AgentRecord | undefined> {
+  try { return JSON.parse(await readFile(agentConfigPath(id), 'utf8')) as AgentRecord }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
+}
+
+async function writeAgentRecord(record: AgentRecord): Promise<void> {
+  const path = agentConfigPath(record.id), temporary = `${path}.${crypto.randomUUID()}.tmp`
+  await mkdir(dirname(path), { recursive: true })
+  try {
+    await writeFile(temporary, JSON.stringify(record, null, 2), { mode: 0o600 })
+    await rename(temporary, path)
+  } finally { await rm(temporary, { force: true }) }
+}
+
+/** Persist one agent: record, overlay patch and credentials. */
+export function saveAgent(record: AgentRecord): Promise<string[]> {
+  return withRecords(async () => {
+    const adminRef = adminRefFor(record.id)
+    const written: string[] = []
+    await writeText(agentPatchPath(record.id), buildPatchYaml(record.config, adminRef, record.id))
+    written.push(agentPatchPath(record.id))
+    await writeCredentials(buildCredentialEntries(record.config, adminRef, record.id))
+    written.push(credentialsPath())
+    await writeAgentRecord(record)
+    written.push(agentConfigPath(record.id))
+    return written
+  })
 }
 
 /** Refresh generated runtime config without rewriting credentials or preferences. */
@@ -245,12 +268,8 @@ export async function refreshAgentPatch(record: AgentRecord): Promise<void> {
 }
 
 /** Read one agent's record; undefined when it does not exist. */
-export async function loadAgent(id: string): Promise<AgentRecord | undefined> {
-  try {
-    return JSON.parse(await readFile(agentConfigPath(id), 'utf8')) as AgentRecord
-  } catch {
-    return undefined
-  }
+export function loadAgent(id: string): Promise<AgentRecord | undefined> {
+  return withRecords(() => readAgentRecord(id))
 }
 
 /** Delete one agent's files (record, patch, compose). */

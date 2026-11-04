@@ -10,7 +10,7 @@ export async function assertPortAvailable(bind: { host: string; port: number }):
     probe.unref()
     probe.once('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'EADDRINUSE') {
-        reject(new Error(`本地 Agent 端口 ${bind.port} 已被占用。请在“编辑配置 → 网络 → 高级网络设置”中更换空闲端口；Relay 服务地址中的端口无需改动。`))
+        reject(new Error(`本地 Agent 端口 ${bind.port} 已被占用。请关闭占用该端口的服务，或在“编辑配置 → 网络 → 局域网”的本机地址后填写空闲端口；使用公网中继时，修改后切回公网中继再保存。Relay 服务地址中的端口无需改动。`))
       } else {
         reject(new Error(`无法监听本地 Agent 地址 ${bind.host}:${bind.port}（${error.code ?? error.message}）`))
       }

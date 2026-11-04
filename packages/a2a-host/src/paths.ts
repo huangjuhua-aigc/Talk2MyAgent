@@ -28,6 +28,12 @@ export const agentPatchPath = (id: string): string => join(agentsHome(), `${id}.
 /** A small preference file shared with the running plugin; absent means enabled. */
 export const agentBriefingPath = (id: string): string => join(hostHome(), 'briefings', `${id}.json`)
 
+/** Runtime files only; never mount the parent, credentials or conversations. */
+export const agentWorkspacesPath = (id: string): string => {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('Invalid agent ID')
+  return join(hostHome(), 'workspaces', id)
+}
+
 /** One agent's compose file (Docker guard only). */
 export const agentComposePath = (id: string): string => join(agentsHome(), `${id}.compose.yaml`)
 

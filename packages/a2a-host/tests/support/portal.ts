@@ -16,7 +16,7 @@ export interface FixtureAgent {
   taskCalls: number
 }
 
-export async function startPortal(agentCount = 2, options: { relayOrigin?: string; publicA2A?: boolean } = {}) {
+export async function startPortal(agentCount = 2, options: { relayOrigin?: string; publicA2A?: boolean; port?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'a2a-ui-'))
   const host = join(root, 'console')
   const agents: FixtureAgent[] = []
@@ -73,7 +73,7 @@ export async function startPortal(agentCount = 2, options: { relayOrigin?: strin
         agent.record.config.network.port = address.port
         await mkdir(join(host, 'relay', id), { recursive: true })
         await writeFile(join(host, 'relay', id, 'applied.json'), JSON.stringify({ host: '127.0.0.1', port: address.port,
-          fingerprint: createHash('sha256').update(JSON.stringify({ peers: agent.record.config.peers, isolation: agent.record.config.isolation })).digest('hex') }))
+          fingerprint: createHash('sha256').update(JSON.stringify({ visitorRuntime: 'microsandbox-0.4-v1', peers: agent.record.config.peers, isolation: agent.record.config.isolation })).digest('hex') }))
       }
       await writeFile(join(host, 'agents', `${id}.json`), JSON.stringify(agent.record))
       await writeFile(agent.briefing, `## 最近在做什么\n${name} 的第一版简报`)
@@ -108,7 +108,7 @@ export async function startPortal(agentCount = 2, options: { relayOrigin?: strin
     child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
       "import { serve } from './src/server.ts'; console.log('PORT=' + await serve());"], {
       cwd: fileURLToPath(new URL('../..', import.meta.url)),
-      env: { ...process.env, A2A_HOST_HOME: host, DSH_HOME: join(root, 'dsh'), A2A_HOST_PORT: '0',
+      env: { ...process.env, A2A_HOST_HOME: host, DSH_HOME: join(root, 'dsh'), A2A_HOST_PORT: String(options.port ?? 0),
         A2A_RELAY_DEFAULT_HOST: options.relayOrigin ?? '', A2A_RELAY_ALLOW_LOOPBACK_HTTP: options.relayOrigin ? '1' : '0' },
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     })
@@ -125,6 +125,9 @@ export async function startPortal(agentCount = 2, options: { relayOrigin?: strin
       processUnderTest.once('error', error => { clearTimeout(timer); reject(error) })
       processUnderTest.once('exit', code => { clearTimeout(timer); reject(new Error(`Portal exited ${code}: ${errors}`)) })
     })
+    // Public A2A fixture is already listening; expose a running indicator for publication UI.
+    // These tests never use the Agent stop control on this shared fixture process.
+    if (options.publicA2A) for (const agent of agents) await writeFile(join(host, 'agents', `${agent.record.id}.pid`), String(processUnderTest.pid))
     return { root, host, agents, baseURL: `http://127.0.0.1:${port}`, close,
       readRecord: async (id: string): Promise<AgentRecord> => JSON.parse(await readFile(join(host, 'agents', `${id}.json`), 'utf8')) as AgentRecord }
   } catch (error) { await close(); throw error }

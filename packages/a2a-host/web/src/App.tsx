@@ -121,7 +121,7 @@ export function App(): React.JSX.Element {
           >
             + 新建 Agent
           </button>
-          <p className="sidebar-note">配置模型与共享资料，启动 Agent，再把邀请发给访客。</p>
+          <p className="sidebar-note">保存 Agent，获取固定地址并准备邀请；启动后即可接待访客。</p>
         </aside>
         <main>
           <ErrorBoundary>

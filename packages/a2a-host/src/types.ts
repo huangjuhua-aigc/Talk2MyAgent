@@ -8,6 +8,8 @@
 /** One visitor's identity, credential, and conversation admission. */
 export interface PeerEntry {
   name: string
+  /** Human-readable name; the stable name above remains the sandbox identity. */
+  displayName?: string
   token: string
   /** Whether this visitor may converse and use the rooted read_file capability. */
   trusted: boolean
@@ -33,6 +35,8 @@ export interface ModelEntry {
 
 /** Everything the wizard collects in its seven screens. */
 export interface WizardConfig {
+  /** Deprecated local number. Never authoritative; Relay invitations use publication.contactId. */
+  contactId?: string
   card: { name: string; description: string }
   models: ModelEntry[]
   /** Which entry the online agent actually runs on. */
@@ -41,15 +45,14 @@ export interface WizardConfig {
   /** The monitoring token (credential reference A2A_ADMIN_TOKEN). */
   adminToken: string
   isolation: {
-    /** Owner-selected shared read-only data root. Per-visitor runtime cwd
-     *  directories remain separate beneath it. */
+    /** Owner-selected shared read-only data root. Private workspaces live outside it. */
     workspaceRoot: string
-    /** Optional per-visitor cwd and authorized read-root overrides. */
+    /** Legacy per-visitor public read-root overrides; never the runtime cwd. */
     peerWorkspaces: Record<string, string>
   }
   network: {
     mode: 'lan' | 'custom' | 'relay'
-    relay?: { provider: 'default' | 'custom'; host?: string; enabled: boolean }
+    relay?: { provider: 'default' | 'custom'; host?: string; enabled: boolean; contactId?: string }
     /** Explicit local listener; custom public URLs default to loopback. */
     bindHost?: string
     /** The address visitors reach: a LAN IP, a tailscale IP, or a domain. */
@@ -85,13 +88,18 @@ export interface KeyStatus {
 export interface DetectResult {
   node: { version: string; ok: boolean }
   dsh: { installed: boolean; version?: string | undefined }
-  docker: { installed: boolean; version?: string | undefined }
+  sandbox: { supported: boolean; automatic: true; reason?: string }
   /** Status of every provider family's key reference. */
   keys: Record<string, KeyStatus>
   /** This machine's LAN IPv4 addresses, best-route one first. */
   lanIps: string[]
   profile: { exists: boolean; pluginInstalled: boolean }
   configured: boolean
+}
+
+export interface StartupProgress {
+  phase: 'checking' | 'installing' | 'image' | 'launching' | 'ready' | 'error'
+  message: string
 }
 
 /** A monitoring snapshot row as the plugin's admin surface returns it. */

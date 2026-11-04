@@ -1,5 +1,7 @@
 # 用 Tailscale 从不同网络访问 A2A agent
 
+> 旧版配置参考：新版 Portal 只提供“公网中继”和“局域网”，已移除下文提到的“自定义地址”和独立端口控件。已有直连配置仍兼容；以下旧界面步骤不适用于新建配置。首次接入请使用[公网中继](relay.md)；本机验证可选择局域网并填写 `127.0.0.1:3080`。
+
 English setup and visitor commands: [English README](../README.en.md#access-from-another-network-with-tailscale).
 
 本教程适用于：agent 在家中电脑运行，你在公司、旅行途中或手机热点下访问；或者把这台电脑上的 agent 分享给指定朋友。

@@ -11,6 +11,10 @@ import { PROVIDERS } from '../../src/providers.ts'
 import { previewPublicUrl as derivedPublicUrl } from '../../src/url.ts'
 import { visitorInstruction } from '../../src/invitation.ts'
 import { relayHostIssue } from './relayForm.ts'
+import { formatLocalAddress, parseLocalAddress } from './localAddress.ts'
+import { StartupNotice } from './StartupNotice.tsx'
+import { isContactId } from '../../src/contact-id.ts'
+import type { PublicationStatus } from '@talk2myagent/a2a-connector'
 
 export const DEFAULT_CONFIG: WizardConfig = {
   card: { name: 'my-agent', description: '能读代码、查资料、跑任务的在线 agent。' },
@@ -37,8 +41,17 @@ export function Wizard(props: {
   // Editing an existing agent: every screen is already populated, so every
   // tab is reachable at once. Creating: only the screens reached so far.
   const [maxStep, setMaxStep] = useState(props.agentId !== undefined ? STEPS.length - 1 : 0)
-  const [config, setConfig] = useState<WizardConfig>(props.initial)
+  const [storedConfig, setConfig] = useState<WizardConfig>(props.initial)
   const [detectResult, setDetectResult] = useState<DetectResult | undefined>(undefined)
+  const [localAddressDraft, setLocalAddressDraft] = useState<string>()
+  const fallbackHost = detectResult?.lanIps[0] ?? '127.0.0.1'
+  const localAddress = localAddressDraft ?? formatLocalAddress(storedConfig.network.host ?? fallbackHost, storedConfig.network.port)
+  const parsedLocalAddress = parseLocalAddress(localAddress)
+  const networkValid = storedConfig.network.mode === 'lan' ? parsedLocalAddress !== undefined
+    : storedConfig.network.mode !== 'relay' || isContactId(storedConfig.network.relay?.contactId)
+      || !!props.agentId && props.initial.network.mode === 'relay' && storedConfig.network.relay?.contactId === undefined
+  const config = storedConfig.network.mode === 'lan' && parsedLocalAddress
+    ? { ...storedConfig, network: { ...storedConfig.network, ...parsedLocalAddress } } : storedConfig
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
   const [saveError, setSaveError] = useState<string>()
@@ -58,6 +71,7 @@ export function Wizard(props: {
 
   /** Mid-wizard save for edits: persist without walking to the last screen. */
   const saveable = config.models.some(entry => entry.model.length > 0)
+    && networkValid
     && config.isolation.workspaceRoot.length > 0
     && config.peers.length > 0
     && config.peers.every(peer => peer.name.length > 0 && peer.token.length > 0)
@@ -70,9 +84,6 @@ export function Wizard(props: {
       setTimeout(() => { setSaved(false) }, 2500)
     }).catch(error => setSaveError(`保存失败：${String(error)}`)).finally(() => setBusy(false))
   }
-  /** When the user set no address, instructions still need a real one: the
-   *  detected LAN IP first, loopback last. */
-  const fallbackHost = detectResult?.lanIps[0] ?? '127.0.0.1'
   const saveButton = props.agentId !== undefined && screen < STEPS.length - 1 ? (
     <button
       className={saved ? 'primary' : undefined}
@@ -122,11 +133,14 @@ export function Wizard(props: {
       )}
       {screen === 3 && (
         <NetworkScreen
+          agentId={props.agentId}
           config={config}
           patch={patch}
           onBack={back}
           onNext={next}
           lanIps={detectResult?.lanIps}
+          localAddress={localAddress}
+          onLocalAddressChange={setLocalAddressDraft}
         />
       )}
       {screen === 4 && <VisitorsScreen config={config} patch={patch} onBack={back} onNext={next} fallbackHost={fallbackHost} />}
@@ -140,6 +154,7 @@ export function Wizard(props: {
           onLive={props.onDone}
           fallbackHost={fallbackHost}
           keys={detectResult?.keys}
+          networkValid={networkValid}
         />
       )}
       </SaveContext.Provider>
@@ -216,6 +231,9 @@ function DetectScreen(props: {
     if (!result.dsh.installed) {
       steps.push('安装 DeepSeek Harness CLI：npm install -g @deepseek-ai/dsh，装完运行 dsh --version 确认能输出版本号。')
     }
+    if (!result.sandbox.supported) {
+      steps.push(result.sandbox.reason ?? '请使用支持本地沙箱的系统。')
+    }
     if (!Object.values(result.keys).some(key => key.configured)) {
       steps.push('配置至少一家的 API Key（DeepSeek / OpenAI / 豆包 / 智谱 / Kimi / 阶跃任选）：在 ~/.dsh/.credentials.yaml 里写入对应一行的键与值（如 DEEPSEEK_API_KEY: sk-…）；没有可用的 key 就停下来向我要，不要自己编。')
     }
@@ -225,7 +243,7 @@ function DetectScreen(props: {
   }
 
   const missing = result !== undefined
-    && (!result.node.ok || !result.dsh.installed || !Object.values(result.keys).some(key => key.configured))
+    && (!result.node.ok || !result.dsh.installed || !result.sandbox.supported || !Object.values(result.keys).some(key => key.configured))
 
   const chip = (ok: boolean, okText: string, badText: string): React.JSX.Element => (
     <span className={`chip ${ok ? 'ok' : 'warn'}`}>{ok ? okText : badText}</span>
@@ -243,6 +261,10 @@ function DetectScreen(props: {
           <div className="row">
             <span className="grow">dsh 运行时</span>
             {chip(result.dsh.installed, result.dsh.version ?? '已安装', '未安装')}
+          </div>
+          <div className="row">
+            <span className="grow">访客独立沙箱</span>
+            {chip(result.sandbox.supported, '启动时自动准备', result.sandbox.reason ?? '当前系统暂不支持')}
           </div>
           <div className="row">
             <span className="grow">API Key（任选一家）</span>
@@ -446,12 +468,12 @@ function VisitorsScreen(props: {
   const { peers } = props.config
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
   const [failedIndex, setFailedIndex] = useState<number | null>(null)
-  const rawUrl = props.config.network.mode === 'relay' ? '启动后在管理页查看公网地址' : derivedPublicUrl(props.config.network, props.fallbackHost)
+  const rawUrl = props.config.network.mode === 'relay' ? '保存后在控制台获取固定地址' : derivedPublicUrl(props.config.network, props.fallbackHost)
     ?? `http://127.0.0.1:${props.config.network.port}/a2a`
   const relay = props.config.network.mode === 'relay'
   const hasPlaceholder = !relay && props.config.network.host === undefined
   const update = (index: number, name: string, token: string, trusted: boolean): void => {
-    const next = peers.map((peer, i) => i === index ? { name, token, trusted } : peer)
+    const next = peers.map((peer, i) => i === index ? { ...peer, name, token, trusted } : peer)
     props.patch({ peers: next })
   }
   /**
@@ -482,9 +504,12 @@ function VisitorsScreen(props: {
             <label className="field"><span>访客名</span>
             <input
               type="text"
-              value={peer.name}
-              placeholder="访客名（字母数字）"
-              onChange={event => update(index, event.target.value, peer.token, peer.trusted)}
+              value={peer.displayName ?? peer.name}
+              placeholder={peer.displayName === undefined ? '访客名（字母数字）' : '访客姓名'}
+              onChange={event => {
+                if (peer.displayName === undefined) update(index, event.target.value, peer.token, peer.trusted)
+                else props.patch({ peers: peers.map((p, i) => i === index ? { ...p, displayName: event.target.value } : p) })
+              }}
             />
             </label>
             <label className="field"><span>访客令牌</span>
@@ -511,7 +536,7 @@ function VisitorsScreen(props: {
             />
             <span>允许对话和读取指定工作目录；不勾选则禁止访问。暂不开放写文件、执行命令等其他工具。</span>
           </label>
-          {relay ? <p className="field-note">Relay 服务可访问后，还需保存并启动 Agent。请在控制台「公网中继」查看连接状态，显示「公网已上线」时即可复制聊天邀请。</p> : <details>
+          {relay ? <p className="field-note">保存后进入控制台，可先获取固定地址并准备聊天邀请；启动 Agent 后，访客即可连接。</p> : <details>
           <summary>查看与复制访客配置指令</summary>
           <div className="row">
             <button
@@ -563,13 +588,14 @@ function WorkspaceScreen(props: {
         onChange={path => props.patch({ isolation: { ...isolation, workspaceRoot: path } })}
       />
       <div className="callout">
-        <strong>目录结构</strong>（根目录中的资料供获准访客读取；运行目录按访客区分）：
-        <pre className="code" style={{ margin: '6px 0' }}>{`<根目录>/
-├── zhangsan/   ← 访客 zhangsan 的 agent 在这里干活（cwd）
-├── lisi/       ← 访客 lisi 的 agent 在这里干活
-└── docs/…      ← 直接放在根目录下的文件 = 公共只读区（共享资料、说明）`}</pre>
-        当前只开放<strong>读取文本文件和查看目录</strong>，不能读取所选目录以外的文件；写入、命令等工具以后逐步开放。
-        访客之间的会话单独保存，系统会话存储不会通过文件读取开放。请将允许分享的资料放在这个工作目录中。
+        <strong>公共资料与私有工作区分开存放</strong>：
+        <pre className="code" style={{ margin: '6px 0' }}>{`所选资料目录 → 沙箱内 /source（只读副本）
+
+zhangsan 的沙箱 → /work（独立持久化磁盘）
+lisi 的沙箱    → /work（另一块独立持久化磁盘）`}</pre>
+        <p className="field-note">私有文件保存在本机虚拟磁盘中，停止沙箱后仍会保留；不会同步回旧的访客文件夹。</p>
+        当前只开放<strong>读取文本文件和查看目录</strong>，范围是公共资料和该访客自己的工作区；写入、命令等工具以后逐步开放。
+        每位访客使用独立沙箱，只能读取公共资料，以及读写自己的私有工作区。空闲 30 秒暂停、10 分钟停止，私有文件保留。首次启动自动准备环境；其他访客的数据、聊天记录和凭据不会放入沙箱。
       </div>
       <Nav onBack={props.onBack} onNext={props.onNext} nextDisabled={isolation.workspaceRoot.length === 0} />
     </div>
@@ -577,16 +603,24 @@ function WorkspaceScreen(props: {
 }
 
 function NetworkScreen(props: {
+  agentId?: string | undefined
   config: WizardConfig
   patch: (part: Partial<WizardConfig>) => void
   onBack: () => void
   onNext: () => void
   lanIps?: string[] | undefined
+  localAddress: string
+  onLocalAddressChange: (value: string | undefined) => void
 }): React.JSX.Element {
   const { network } = props.config
-  const [showGuide, setShowGuide] = useState(false)
   const [defaultHost, setDefaultHost] = useState<string>()
   const [sessionError, setSessionError] = useState('')
+  const [publication, setPublication] = useState<PublicationStatus>()
+  useEffect(() => {
+    let canceled = false
+    if (props.agentId) void api.publication(props.agentId).then(result => { if (!canceled) setPublication(result) }).catch(() => {})
+    return () => { canceled = true }
+  }, [props.agentId])
   useEffect(() => {
     let canceled = false
     void api.session().then(result => { if (!canceled) setDefaultHost(result.defaultRelayHost) })
@@ -595,20 +629,26 @@ function NetworkScreen(props: {
   }, [])
   const provider = network.relay?.provider ?? 'default'
   const relayIssue = provider === 'custom' ? relayHostIssue(network.relay?.host ?? '') : undefined
-  const derived = derivedPublicUrl(network)
-  const invalidAddress = network.mode === 'custom' && derived === undefined
-  const invalidPort = !Number.isInteger(network.port) || network.port < 1 || network.port > 65535
-  const invalidRelay = network.mode === 'relay' && (provider === 'custom' ? !!relayIssue : !defaultHost)
+  const origin = (provider === 'custom' ? network.relay?.host?.trim() : defaultHost)?.replace(/\/$/, '')
+  const fixedNumber = publication?.relayOrigin === origin && isContactId(publication?.contactId) ? publication.contactId : undefined
+  const numberInvalid = !fixedNumber && !isContactId(network.relay?.contactId)
+  const invalidAddress = network.mode === 'lan' && !parseLocalAddress(props.localAddress)
+  const derived = invalidAddress ? undefined : derivedPublicUrl(network)
+  const invalidRelay = network.mode === 'relay' && (numberInvalid || (provider === 'custom' ? !!relayIssue : !defaultHost))
   const choose = (mode: WizardConfig['network']['mode']): void => {
-    props.patch({ network: { ...network, mode,
-      ...(mode === 'lan' && network.mode !== 'lan' && props.lanIps?.[0] ? { host: props.lanIps[0] } : {}),
+    props.onLocalAddressChange(undefined)
+    const nextNetwork = { ...network, mode,
+      ...(mode === 'lan' && network.mode !== 'lan' ? { host: props.lanIps?.[0] ?? '127.0.0.1' } : {}),
       ...(mode === 'relay' ? { relay: network.relay ?? { provider: 'default', enabled: true } } : {}),
-    } })
+    }
+    delete nextNetwork.bindHost
+    delete nextNetwork.publicUrl
+    props.patch({ network: nextNetwork })
   }
   return (
     <section className="card" aria-label="网络设置">
       <h2>访客如何连接你的 Agent？</h2>
-      <p className="hint">选择一种连接方式。公网中继会自动分配访问地址；已有网络地址也可以直接使用。</p>
+      <p className="hint">跨网络访问选择公网中继；同一局域网内可以直接连接。</p>
       <fieldset className="network-choices">
         <legend className="sr-only">连接方式</legend>
         <label className={`network-choice ${network.mode === 'relay' ? 'selected' : ''}`}>
@@ -619,16 +659,12 @@ function NetworkScreen(props: {
           <input type="radio" name="network-mode" aria-label="局域网地址（自动检测本机 IP）" checked={network.mode === 'lan'} onChange={() => choose('lan')} />
           <span><strong>局域网</strong><small>适合同一路由器下的设备</small></span>
         </label>
-        <label className={`network-choice ${network.mode === 'custom' ? 'selected' : ''}`}>
-          <input type="radio" name="network-mode" aria-label="自定义地址（Tailscale、公网域名等）" checked={network.mode === 'custom'} onChange={() => choose('custom')} />
-          <span><strong>自定义地址</strong><small>使用 Tailscale 或已有域名</small></span>
-        </label>
       </fieldset>
       {network.mode === 'relay' ? (
         <div className="network-panel">
           <label className="field"><span>Relay 服务</span>
             <select value={provider} onChange={e => props.patch({ network: { ...network, relay: { ...network.relay, provider: e.target.value as 'default' | 'custom', enabled: true } } })}>
-              <option value="default">默认 Relay{defaultHost === undefined ? '（读取中）' : defaultHost ? '' : '（尚未提供）'}</option>
+              <option value="default">默认 Relay{defaultHost === undefined ? '（读取中）' : defaultHost ? ` · ${defaultHost}` : '（尚未提供）'}</option>
               <option value="custom">自定义 Relay host</option>
             </select>
           </label>
@@ -636,11 +672,22 @@ function NetworkScreen(props: {
             <label className="field"><span>Relay host</span>
               <input type="text" className="relay-host-input" aria-label="Relay host" aria-describedby="wizard-relay-help" aria-invalid={!!network.relay?.host && !!relayIssue}
                 autoComplete="url" spellCheck={false} placeholder="https://relay.example.com" value={network.relay?.host ?? ''}
-                onChange={e => props.patch({ network: { ...network, relay: { provider: 'custom', host: e.target.value, enabled: true } } })} />
+                onChange={e => props.patch({ network: { ...network, relay: { ...network.relay, provider: 'custom', host: e.target.value, enabled: true } } })} />
               <span className="field-note" id="wizard-relay-help">填写 Relay 服务地址；如需指定端口，写在这里，例如 https://relay.example.com:8443。Agent 的访问地址会自动生成。</span>
             </label>
-          ) : <p className="field-note">{sessionError || (defaultHost ? `将连接：${defaultHost}` : '还没有默认服务，请选择自定义 Relay host。')}</p>}
+          ) : sessionError || defaultHost === '' ? (
+            <p className="field-note">{sessionError || '还没有默认服务，请选择自定义 Relay host。'}</p>
+          ) : null}
           {provider === 'custom' && network.relay?.host && relayIssue ? <p role="alert">{relayIssue}</p> : null}
+          <label className="field"><span>手机号（公开编号）</span>
+            <input type="tel" inputMode="numeric" autoComplete="tel-national" maxLength={11} placeholder="13812345678" aria-label="手机号（公开编号）"
+              aria-describedby="wizard-number-help" aria-invalid={!fixedNumber&&!!network.relay?.contactId&&numberInvalid}
+              value={fixedNumber ?? network.relay?.contactId ?? ''} readOnly={!!fixedNumber}
+              onChange={e => props.patch({ network: { ...network, relay: { ...network.relay, provider, enabled: true, contactId: e.target.value.trim() } } })}/>
+            <span id="wizard-number-help" className="field-note">{fixedNumber?'已登记，编号固定；关闭发布仍会保留。':'填写自己的 11 位手机号，用作公开 Agent 编号。暂不验证号码归属；重号时注册会被拒绝。'}</span>
+          </label>
+          {!fixedNumber&&network.relay?.contactId&&numberInvalid?<p role="alert">请填写有效的 11 位手机号。</p>:null}
+          {!numberInvalid&&origin?<p className="field-note">{fixedNumber?'已登记编号':'注册成功后地址'}：<span className="mono">{origin}/r/{fixedNumber ?? network.relay?.contactId}/a2a</span>{fixedNumber?'':'（尚未注册）'}</p>:null}
           <div className="connection-result">保存并启动 Agent 后自动连接。在控制台查看访问地址，复制完整聊天邀请。</div>
         </div>
       ) : null}
@@ -649,37 +696,23 @@ function NetworkScreen(props: {
           <h3>选择本机地址</h3>
           {props.lanIps === undefined ? <p className="muted">正在检测本机网络…</p> : props.lanIps.length === 0 ? (
             <p className="muted">未检测到局域网地址，请确认已连接网络，或选择其他连接方式。</p>
-          ) : <div className="row">{props.lanIps.map(ip => <button key={ip} className={network.host === ip ? 'primary mono' : 'mono'}
-            aria-pressed={network.host === ip} onClick={() => props.patch({ network: { ...network, host: ip } })}>{ip}</button>)}</div>}
+          ) : <div className="row">{props.lanIps.map(ip => <button key={ip} className={network.host === ip && !invalidAddress ? 'primary mono' : 'mono'}
+            aria-pressed={network.host === ip && !invalidAddress} onClick={() => props.onLocalAddressChange(formatLocalAddress(ip, network.port))}>{formatLocalAddress(ip, network.port)}</button>)}</div>}
+          <label className="field"><span>本机地址（IP:端口）</span>
+            <input type="text" className="mono" spellCheck={false} autoComplete="off" placeholder="192.168.1.10:3080"
+              aria-invalid={invalidAddress} aria-describedby="local-address-help" value={props.localAddress}
+              onChange={event => props.onLocalAddressChange(event.target.value)} />
+            <span className="field-note" id="local-address-help">端口直接写在地址后面，例如 192.168.1.10:3080；仅在本机访问可填 127.0.0.1:3080。</span>
+          </label>
+          {invalidAddress ? <p role="alert">请填写有效的本机 IP 和端口（1–65535），例如 192.168.1.10:3080。</p> : null}
           <p className="field-note">访客需要连接同一个局域网。存在多张网卡时，选择访客能访问的 IP。</p>
         </div>
       ) : null}
       {network.mode === 'custom' ? (
-        <div className="network-panel">
-          <label className="field"><span>对外地址（Tailscale IP、域名或完整 HTTPS 地址）</span>
-            <input type="text" spellCheck={false} aria-invalid={!!network.host && invalidAddress}
-              placeholder="100.101.102.103 或 a2a.example.com 或 https://a2a.example.com" value={network.host ?? ''}
-              onChange={event => props.patch({ network: { ...network, host: event.target.value || undefined } })} />
-          </label>
-          <button className="quiet" aria-expanded={showGuide} onClick={() => setShowGuide(value => !value)}>{showGuide ? '收起配置指南' : '查看 Tailscale 配置指南'}</button>
-          {showGuide ? <div className="callout" style={{ marginTop: 16 }}>
-            两端连接 Tailscale，或使用已有 HTTPS 代理，仅转发 A2A 与名片路径，然后填写得到的地址。
-            <a href="https://github.com/huangjuhua-aigc/Talk2MyAgent/blob/main/docs/tailscale.md" target="_blank" rel="noreferrer">查看完整教程 ↗</a>
-          </div> : null}
-          {network.host && invalidAddress ? <p role="alert">请填写有效的对外地址，不含用户名、密码、查询参数或片段。</p> : null}
-        </div>
+        <p className="field-note">当前保留已保存的旧版直连配置。若要更换连接方式，请选择公网中继或局域网。</p>
       ) : null}
-      <details className="advanced" open={invalidPort || undefined}>
-        <summary>高级网络设置 · 本地端口 {network.port}</summary>
-        <label className="field"><span>端口（dsh web 服务监听端口）</span>
-          <input type="number" min={1} max={65535} value={network.port} aria-invalid={invalidPort}
-            onChange={event => props.patch({ network: { ...network, port: Number(event.target.value) || 3080 } })} />
-        </label>
-        <p className="field-note">这是本地 Agent 的监听端口，默认 3080，通常无需修改。Relay 的端口填写在 Relay host 中；同一台电脑上的两项服务不能占用同一端口。</p>
-      </details>
       {derived ? <div className="connection-result">访客将使用：<span className="mono">{derived}</span></div> : null}
-      {invalidPort ? <p role="alert">端口必须是 1 到 65535 之间的整数。</p> : null}
-      <Nav onBack={props.onBack} onNext={props.onNext} nextDisabled={invalidAddress || invalidPort || invalidRelay} />
+      <Nav onBack={props.onBack} onNext={props.onNext} nextDisabled={invalidAddress || invalidRelay} />
     </section>
   )
 }
@@ -764,6 +797,7 @@ function SummaryRow(props: { label: string; children: React.ReactNode }): React.
 
 function ReviewScreen(props: {
   config: WizardConfig
+  networkValid: boolean
   patch: (part: Partial<WizardConfig>) => void
   agentId?: string | undefined
   onBack: () => void
@@ -776,6 +810,7 @@ function ReviewScreen(props: {
   const [saved, setSaved] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
   const [manual, setManual] = useState<string | undefined>(undefined)
+  const [starting, setStarting] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const config = props.config
@@ -787,6 +822,7 @@ function ReviewScreen(props: {
   }, [phase, savedId])
 
   const save = async (): Promise<void> => {
+    if (!props.networkValid) return
     setBusy(true)
     setError(undefined)
     try {
@@ -804,23 +840,24 @@ function ReviewScreen(props: {
   const start = async (): Promise<void> => {
     if (savedId === undefined) return
     setBusy(true)
+    setStarting(true)
     setError(undefined)
     try {
       const result = await api.start(savedId)
       setManual(result.manual)
       setPhase('started')
-    } catch (error) { setError(`启动失败：${String(error)}`) }
-    finally { setBusy(false) }
+    } catch (error) { setError(`启动失败：${error instanceof Error ? error.message : String(error)}`) }
+    finally { setBusy(false); setStarting(false) }
   }
 
   const active = config.models[config.activeModelIndex] ?? config.models[0]
   const provider = active !== undefined ? (PROVIDERS[active.provider] ?? PROVIDERS.deepseek) : undefined
-  const url = config.network.mode === 'relay' ? '启动后在管理页查看公网地址' : derivedPublicUrl(config.network, props.fallbackHost) ?? `http://127.0.0.1:${config.network.port}/a2a`
+  const url = config.network.mode === 'relay' ? '保存后进入控制台获取固定地址，无需先启动' : derivedPublicUrl(config.network, props.fallbackHost) ?? `http://127.0.0.1:${config.network.port}/a2a`
   const trusted = config.peers.filter(peer => peer.trusted).length
 
   return (
     <div className="card">
-      <h2>{props.agentId === undefined ? '确认并启动' : '确认修改'}</h2>
+      <h2>{props.agentId === undefined ? '确认配置' : '确认修改'}</h2>
       <p className="hint">以下是将生效的全部配置：</p>
       <SummaryRow label="名片"><strong>{config.card.name}</strong>　{config.card.description}</SummaryRow>
       <SummaryRow label="模型">
@@ -839,17 +876,19 @@ function ReviewScreen(props: {
       <SummaryRow label="工作区"><span className="mono">{config.isolation.workspaceRoot}</span></SummaryRow>
 
       <div className="row" style={{ marginTop: 16 }}>
-        <button className={saved ? 'primary' : undefined} disabled={busy} onClick={() => { void save() }}>
+        <button className={saved ? 'primary' : undefined} disabled={busy || !props.networkValid} onClick={() => { void save() }}>
           {saved ? '已保存 ✓' : '保存'}
         </button>
         {phase !== 'started' ? (
           <button className="primary" disabled={busy || savedId === undefined} onClick={() => { void start() }}>启动</button>
         ) : null}
         <span className="grow" />
-        {phase === 'started' && savedId !== undefined ? <button className="primary" onClick={() => props.onLive(savedId)}>进入控制台 →</button> : null}
+        {savedId !== undefined ? <button className={phase === 'started' ? 'primary' : undefined} disabled={busy} onClick={() => props.onLive(savedId)}>进入控制台 →</button> : null}
       </div>
 
+      {starting && savedId !== undefined ? <StartupNotice agentId={savedId} /> : null}
       {error ? <p role="alert" className="field-note">{error}</p> : null}
+      {!props.networkValid ? <p role="alert">请返回「网络」填写有效的本机地址后保存。</p> : null}
 
       {savedId !== undefined ? (
         <div style={{ marginTop: 16 }}>

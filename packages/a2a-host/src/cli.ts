@@ -18,7 +18,11 @@ import { agentManagementPath, agentPatchPath } from './paths.ts'
 import { detect } from './detect.ts'
 import { fetchSnapshot } from './monitor.ts'
 import { resolveBindHost } from './url.ts'
-import { publish, stopPublication, recordRuntime, validateSharedRoots, publicationStatus } from './publication.ts'
+import { prepareAgentWorkspaces } from './isolation.ts'
+import { requireVisitorRuntime } from './visitor-runtime.ts'
+import { waitForAgentReady } from './readiness.ts'
+import { stopAgent } from './stop-agent.ts'
+import { publish, requestPublication, stopPublication, recordRuntime, validateSharedRoots, publicationStatus } from './publication.ts'
 
 const command = process.argv[2] ?? 'ui'
 /** Optional agent id argument; defaults to the newest saved agent. */
@@ -71,24 +75,30 @@ if (command === 'ui' || command === 'wizard') {
   if (command === 'start') {
     await validateSharedRoots(agent.config)
     const detected = await detect(agent.profile)
-    const firstTime = !detected.profile.exists
+    const firstTime = false
     const bindHost = resolveBindHost(agent.config.network, detected.lanIps)
     const bind = { host: bindHost, port: agent.config.network.port }
+    if (!runner.running) {
+      await requireVisitorRuntime(agent.profile, { onProgress: progress => console.log(progress.message) })
+      await prepareAgentWorkspaces(agent)
+    }
     await refreshAgentPatch(agent)
     const started = runner.start(agent.profile, firstTime, agentPatchPath(agent.id), bind)
+    try { await waitForAgentReady(bind, { isRunning: () => runner.running }) }
+    catch (error) { if (started) runner.stop(); throw error }
     if (started) await recordRuntime(agent, bind)
     if (agent.config.network.mode === 'relay' && agent.config.network.relay?.enabled !== false) await publish(agent)
     console.log(runner.manualCommand(agent.profile, firstTime, agentPatchPath(agent.id), bind))
     console.log('started (closing this console does NOT stop the online agent; use: a2a-host stop)')
   } else if (command === 'stop') {
     await stopPublication(agent.id)
-    const stopped = runner.stop()
+    const stopped = await stopAgent(agent, runner)
     console.log(stopped ? 'online agent stopped' : 'no running online agent found')
   } else if (command === 'publish') {
     agent.config.network.mode = 'relay'
     agent.config.network.relay = { ...agent.config.network.relay, provider: agent.config.network.relay?.provider ?? 'default', enabled: true }
     await saveAgent(agent)
-    console.log(JSON.stringify(await publish(agent), null, 2))
+    console.log(JSON.stringify(await requestPublication(agent, runner.running), null, 2))
   } else if (command === 'unpublish') {
     await stopPublication(agent.id)
     if (agent.config.network.relay) { agent.config.network.relay.enabled = false; await saveAgent(agent) }

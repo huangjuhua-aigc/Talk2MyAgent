@@ -33,7 +33,7 @@ function save() {
   writes = writes.catch(() => {}).then(async () => { const tmp = join(dir, `state.${randomUUID()}.tmp`); await writeFile(tmp, text, { mode: 0o600 }); await rename(tmp, join(dir, 'state.json')) })
   return writes
 }
-const snapshot = () => ({ ...current, instanceId, desiredEnabled: state.desiredEnabled, cloudSyncPending: state.cloudSyncPending,
+const snapshot = () => ({ ...state.registrations[state.config?.relayOrigin]?.info, ...current, instanceId, desiredEnabled: state.desiredEnabled, cloudSyncPending: state.cloudSyncPending,
   relayOrigin: state.config?.relayOrigin, localRpcUrl: state.config?.localRpcUrl, localCardUrl: state.config?.localCardUrl })
 function start() {
   connector?.stop()
@@ -59,11 +59,25 @@ async function enable(enabled) {
 }
 async function action(body) {
   if (body.action === 'status') return snapshot()
+  if (body.action === 'register') {
+    if (!state.config) throw new Error('Configure Relay first')
+    const before = current
+    connector ??= new Connector({ config: state.config, state, save })
+    try {
+      const registration = await connector.register() // Also refresh legacy registration metadata without interrupting forwarding.
+      current = { ...(state.desiredEnabled ? before : { state: 'registered' }), ...registration.info }
+    } catch (error) { current = before; throw error }
+    return snapshot()
+  }
   if (body.action === 'configure') {
     const c = body.config
     if (!c || typeof c.displayName !== 'string' || c.displayName.length > 128) throw new Error('Invalid connector configuration')
+    if (c.contactId !== undefined && (typeof c.contactId !== 'string' || !/^1[3-9]\d{9}$/.test(c.contactId))) throw new Error('请填写有效的 11 位手机号作为公开编号')
     const config = { relayOrigin: originOf(c.relayOrigin, c.allowHttp === true), localRpcUrl: localTarget(c.localRpcUrl),
-      localCardUrl: localTarget(c.localCardUrl), displayName: c.displayName, allowHttp: c.allowHttp === true }
+      localCardUrl: localTarget(c.localCardUrl), displayName: c.displayName, allowHttp: c.allowHttp === true,
+      ...(c.contactId ? { contactId: c.contactId } : {}) }
+    const registered = state.registrations[config.relayOrigin]?.info?.contactId
+    if (registered && config.contactId && registered !== config.contactId) throw new Error('该 Agent 的公网编号已固定，不能更改。')
     if (new URL(config.localRpcUrl).origin !== new URL(config.localCardUrl).origin) throw new Error('Local RPC and Agent Card must use the same origin')
     if (state.desiredEnabled) {
       if (JSON.stringify(config) === JSON.stringify(state.config)) return snapshot()
@@ -79,6 +93,7 @@ async function action(body) {
     if (state.desiredEnabled) throw new Error('请先关闭发布，再重置 Relay 身份')
     connector?.stop(); connector = undefined
     state.registrations = {}; state.cloudSyncPending = false; state.revision = 0; state.operationId = randomUUID()
+    if (state.config) delete state.config.contactId
     current = { state: 'unregistered' }; await save(); return snapshot()
   }
   if (body.action === 'shutdown') {

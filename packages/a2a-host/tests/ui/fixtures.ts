@@ -19,7 +19,7 @@ export const test = base.extend<{ portal: TestPortal; agentCount: number }>({
       } else { await route.continue() }
     })
     await page.route('**/api/detect', route => route.fulfill({ json: {
-      node: { version: 'v22.0.0', ok: true }, dsh: { installed: true, version: 'fixture' }, docker: { installed: false },
+      node: { version: 'v22.0.0', ok: true }, dsh: { installed: true, version: 'fixture' }, sandbox: { supported: true, automatic: true },
       keys: { DEEPSEEK_API_KEY: { configured: true, masked: 'fixture-key' } }, lanIps: ['127.0.0.1'],
       profile: { exists: true, pluginInstalled: true }, configured: true,
     } }))

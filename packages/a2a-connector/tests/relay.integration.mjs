@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { Connector, control } from '../src/connector.mjs'
-import { configure, setEnabled, status, command, ensureDaemon, resetIdentity } from '../src/manager.mjs'
+import { configure, register, setEnabled, status, command, ensureDaemon, resetIdentity } from '../src/manager.mjs'
 if (!process.env.A2A_RELAY_SOURCE) throw new Error('Set A2A_RELAY_SOURCE to the independent Relay repository')
 const { createRelay } = await import(pathToFileURL(join(process.env.A2A_RELAY_SOURCE, 'src/server.mjs')))
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -72,6 +72,64 @@ test('real HTTP/WS: cards, auth, Unicode SSE, capacity, reconnect, no replay and
     assert.equal((await rpc('SendMessage')).status,503)
   } finally { c.stop(); await f.close() }
 })
+
+test('chosen mobile IDs form working URLs, remain stable, and conflicts never mint a replacement identity', async () => {
+  const f = await fixture(), state = { registrations:{}, desiredEnabled:true, revision:1, operationId:randomUUID(), cloudSyncPending:true }
+  const config = { ...f.config, contactId:'18612345678' }
+  let snapshot, duplicateStatus
+  const c = new Connector({config,state,save:async()=>{},onStatus:s=>{snapshot=s}})
+  const duplicateState = { registrations:{}, desiredEnabled:true, revision:1, operationId:randomUUID(), cloudSyncPending:true }
+  const duplicate = new Connector({config,state:duplicateState,save:async()=>{},onStatus:s=>{duplicateStatus=s}})
+  try {
+    void c.start(); await until(()=>snapshot?.state==='online')
+    const pub = `${f.config.relayOrigin}/r/18612345678/a2a`
+    assert.equal(snapshot.publicRpcUrl,pub)
+    assert.equal((await (await fetch(snapshot.publicCardUrl)).json()).supportedInterfaces[0].url,pub)
+    const rpc=await fetch(pub,{method:'POST',headers:{authorization:'Bearer visitor'},body:JSON.stringify({id:1,method:'SendMessage'})})
+    assert.equal(rpc.status,200)
+    assert.equal((await rpc.json()).result.text,'你好，🌈')
+    assert.equal((await fetch(`${f.config.relayOrigin}/r/${snapshot.publicationId}/.well-known/agent-card.json`)).status,200)
+    void duplicate.start(); await until(()=>duplicateStatus?.state==='blocked')
+    assert.match(duplicateStatus.error,/已被占用/)
+    assert.equal(duplicate.heals.identity,0)
+    assert.equal(f.relay.store.db.prepare('SELECT count(*) AS n FROM agents').get().n,1)
+    const saved=state.registrations[f.config.relayOrigin].info
+    assert.equal((await c.register()).info.publicRpcUrl,pub)
+    const altered=new Connector({config:{...config,contactId:'18512345678'},state,save:async()=>{}})
+    await assert.rejects(altered.register(),e=>e.code==='CONTACT_ID_IMMUTABLE')
+    assert.deepEqual(state.registrations[f.config.relayOrigin].info,saved)
+  } finally {c.stop();duplicate.stop();await f.close()}
+})
+
+test('reserve a route with the Agent offline, retain it across daemon restart, then connect to the same URL', async () => {
+  const f=await fixture(), dir=await mkdtemp(join(tmpdir(),'connector-reserve-'))
+  const port=f.local.address().port
+  await new Promise(r=>f.local.close(r))
+  try {
+    await configure(dir,f.config)
+    const reserved=await register(dir)
+    assert.equal(reserved.state,'registered');assert.equal(reserved.desiredEnabled,false)
+    assert.match(reserved.contactId,/^13[89]\d{8}$/)
+    assert.equal(reserved.contactId,f.relay.store.get(reserved.publicationId).contactId)
+    assert.ok(reserved.publicRpcUrl);assert.equal(f.relay.sessions.size,0)
+    assert.equal((await fetch(reserved.publicCardUrl)).status,503)
+    assert.equal((await register(dir)).publicRpcUrl,reserved.publicRpcUrl)
+    assert.equal((await register(dir)).contactId,reserved.contactId)
+    await command(dir,'shutdown');await until(async()=>!(await status(dir)).instanceId)
+    assert.equal((await status(dir)).publicRpcUrl,reserved.publicRpcUrl)
+    await ensureDaemon(dir)
+    assert.equal((await register(dir)).publicRpcUrl,reserved.publicRpcUrl)
+    assert.equal((await status(dir)).contactId,reserved.contactId)
+    await new Promise(r=>f.local.listen(port,'127.0.0.1',r))
+    await setEnabled(dir,true);await until(async()=>(await status(dir)).state==='online')
+    assert.equal((await status(dir)).publicRpcUrl,reserved.publicRpcUrl)
+    assert.equal((await fetch(reserved.publicCardUrl)).status,200)
+  } finally {
+    await command(dir,'shutdown').catch(()=>{});await until(async()=>!(await status(dir)).instanceId).catch(()=>{})
+    if(!f.local.listening)await new Promise(r=>f.local.listen(port,'127.0.0.1',r))
+    await f.close();await rm(dir,{recursive:true,force:true})
+  }
+})
 test('daemon singleton, private IPC, persistence, disable and restart keep the same registration', async () => {
   const f=await fixture(), dir=await mkdtemp(join(tmpdir(),'connector-daemon-'))
   try {
@@ -91,6 +149,20 @@ test('daemon singleton, private IPC, persistence, disable and restart keep the s
     assert.equal((await status(dir)).publicRpcUrl,online.publicRpcUrl)
     const saved=JSON.parse(await readFile(join(dir,'state.json'),'utf8')); assert.equal(Object.keys(saved.registrations).length,1)
   } finally { await command(dir,'shutdown').catch(()=>{}); await until(async()=>!(await status(dir)).instanceId).catch(()=>{}); await f.close(); await rm(dir,{recursive:true,force:true}) }
+})
+
+test('legacy cached registrations fetch their number from Relay without changing the route or device credential', async () => {
+  const f=await fixture(), state={registrations:{},desiredEnabled:false,revision:0,operationId:randomUUID()}
+  const c=new Connector({config:f.config,state,save:async()=>{}})
+  try {
+    const r=await c.register(), token=r.token, url=r.info.publicRpcUrl, number=r.info.contactId
+    delete r.info.contactId
+    const refreshed=await c.register()
+    assert.equal(refreshed.info.contactId,number)
+    assert.equal(refreshed.info.contactId,f.relay.store.get(refreshed.info.publicationId).contactId)
+    assert.equal(refreshed.token,token);assert.equal(refreshed.info.publicRpcUrl,url)
+    assert.equal(f.relay.sessions.size,0)
+  } finally {c.stop();await f.close()}
 })
 
 test('concurrency is bounded and visitor disconnects release every flow without replay', async () => {

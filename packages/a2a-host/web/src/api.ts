@@ -1,6 +1,6 @@
 /** Typed wrappers over the console CLI's /api. */
 
-import type { DetectResult, HandoffSnapshot, MonitorSnapshot, WizardConfig } from '../../src/types.ts'
+import type { DetectResult, HandoffSnapshot, MonitorSnapshot, WizardConfig, StartupProgress } from '../../src/types.ts'
 import type { PublicationStatus } from '@talk2myagent/a2a-connector'
 let session: Promise<{ csrfToken: string; defaultRelayHost: string }> | undefined
 const localSession = () => session ??= get<{ csrfToken: string; defaultRelayHost: string }>('/api/session').catch(error => { session = undefined; throw error })
@@ -37,6 +37,7 @@ export interface AgentDetail {
   updatedAt: string
   running: boolean
   manual?: string
+  appliedPeers?: string[]
 }
 
 export interface PreviewResult {
@@ -48,9 +49,10 @@ export interface PreviewResult {
 export const api = {
   session: localSession,
   publication: (id: string) => get<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/status`),
-  setPublication: (id: string, config: { enabled: boolean; provider: 'default' | 'custom'; host: string }) => post<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/config`, config, 'PUT'),
+  setPublication: (id: string, config: { enabled: boolean; provider: 'default' | 'custom'; host: string; contactId?: string }) => post<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/config`, config, 'PUT'),
   resetPublication: (id: string) => post<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/reset`, {}),
-  invitation: (id: string, peerName: string) => post<{ text: string }>(`/api/agents/${encodeURIComponent(id)}/publication/invitation`, { peerName }),
+  invitation: (id: string, peerName: string) => post<{ text: string; notice: string; online: boolean }>(`/api/agents/${encodeURIComponent(id)}/publication/invitation`, { peerName }),
+  addVisitor: (id: string, displayName: string, token: string) => post<{ peer: { name: string; displayName: string }; requiresRestart: boolean }>(`/api/agents/${encodeURIComponent(id)}/visitors`, { displayName, token }),
   detect: () => get<DetectResult>('/api/detect'),
   agents: () => get<AgentSummary[]>('/api/agents'),
   agent: (id: string) => get<AgentDetail>(`/api/agents/${encodeURIComponent(id)}`),
@@ -61,7 +63,7 @@ export const api = {
   install: (id: string, sources: string[]) => post<{ results: { source: string; ok: boolean; output: string }[] }>(`/api/agents/${encodeURIComponent(id)}/install`, { sources }),
   start: (id: string) => post<{ started: boolean; manual: string }>(`/api/agents/${encodeURIComponent(id)}/start`),
   stop: (id: string) => post<{ stopped: boolean }>(`/api/agents/${encodeURIComponent(id)}/stop`),
-  status: (id: string) => get<{ running: boolean; logs: string[] }>(`/api/agents/${encodeURIComponent(id)}/status`),
+  status: (id: string) => get<{ running: boolean; logs: string[]; preparation?: StartupProgress }>(`/api/agents/${encodeURIComponent(id)}/status`),
   monitor: (id: string) => get<{ ok: true; snapshot: MonitorSnapshot } | { ok: false; reason: string }>(`/api/agents/${encodeURIComponent(id)}/monitor`),
   handoff: (id: string) => get<HandoffSnapshot>(`/api/agents/${encodeURIComponent(id)}/handoff`),
   saveHandoff: (id: string, text: string) => post<{ saved: boolean; note: string }>(`/api/agents/${encodeURIComponent(id)}/handoff`, { text }, 'PUT'),

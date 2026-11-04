@@ -13,6 +13,8 @@ import { derivedPublicUrl } from '../../src/url.ts'
 import { HandoffCard } from './HandoffCard.tsx'
 import { PublicationCard } from './PublicationCard.tsx'
 import { CollapsibleCard } from './CollapsibleCard.tsx'
+import { StartupNotice } from './StartupNotice.tsx'
+import { VisitorsCard } from './VisitorsCard.tsx'
 
 const STATE_LABELS: Record<string, string> = {
   TASK_STATE_SUBMITTED: '已提交',
@@ -55,9 +57,10 @@ function AgentOverview(props: { detail: AgentDetail; running: boolean | undefine
       <SummaryRow label="工作区"><span className="mono">{config.isolation.workspaceRoot}</span></SummaryRow>
       <SummaryRow label="访客">
         {config.peers.length} 位，其中 {trusted} 位可对话、读文件
-        （{config.peers.map(peer => peer.name).join('、') || '无'}）
+        （{config.peers.map(peer => peer.displayName ?? peer.name).join('、') || '无'}）
       </SummaryRow>
       <SummaryRow label="权限">仅可读取指定工作目录；其他工具关闭</SummaryRow>
+      <SummaryRow label="访客沙箱">每位访客独立；空闲 30 秒暂停、10 分钟停止，私有文件保留</SummaryRow>
       </div>
       {props.children}
     </CollapsibleCard>
@@ -77,6 +80,7 @@ export function MonitorView(props: {
   const [snapshot, setSnapshot] = useState<MonitorSnapshot | undefined>(undefined)
   const [reason, setReason] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
+  const [starting, setStarting] = useState(false)
   const [actionError, setActionError] = useState<string>()
   const visitorContexts = snapshot?.contexts.filter(context => context.peer !== 'owner')
 
@@ -101,7 +105,7 @@ export function MonitorView(props: {
     setBusy(true)
     setActionError(undefined)
     try { await action() }
-    catch (error) { setActionError(`${label}失败：${String(error)}`) }
+    catch (error) { setActionError(`${label}失败：${error instanceof Error ? error.message : String(error)}`) }
     finally { setBusy(false) }
   }
 
@@ -123,7 +127,8 @@ export function MonitorView(props: {
             className="primary"
             disabled={busy || running === true}
             onClick={() => {
-              void perform('启动', async () => { await api.start(props.agentId); refresh(); props.onChanged() })
+              setStarting(true)
+              void perform('启动', async () => { await api.start(props.agentId); refresh(); props.onChanged() }).finally(() => setStarting(false))
             }}
           >
             启动
@@ -152,6 +157,7 @@ export function MonitorView(props: {
           </button>
           </div>
         </div>
+        {starting ? <StartupNotice agentId={props.agentId} /> : null}
         {actionError ? <p role="alert" className="field-note">{actionError}</p> : null}
         {showLogs ? <pre className="code" style={{ marginTop: 12 }}>{logs.slice(-40).join('\n') || '（暂无日志）'}</pre> : null}
       </div>
@@ -161,18 +167,19 @@ export function MonitorView(props: {
     <>
       {detail !== undefined ? <AgentOverview detail={detail} running={running}>{controls}</AgentOverview> : <p className="muted">加载中…</p>}
       {detail !== undefined ? <PublicationCard detail={detail} onChanged={refresh} /> : null}
+      {detail !== undefined ? <VisitorsCard key={detail.id} detail={detail} running={running === true} agentBusy={busy} onBusyChange={setBusy} onChanged={refresh} /> : null}
       <HandoffCard key={props.agentId} agentId={props.agentId} />
       <CollapsibleCard label="来访记录" storageKey={`${props.agentId}:visitors`}
         heading={<><h2>来访记录</h2><p className="hint">访客的问题与 Agent 的答复，仅在本机显示。</p></>}
         status={<span className="chip">每 5 秒更新</span>}>
-        {reason !== undefined ? <p className="muted">{reason}</p> : null}
+        {reason !== undefined ? <p className="muted">{running === false && !snapshot ? 'Agent 尚未运行，启动后可查看来访记录。' : reason}</p> : null}
         {visitorContexts?.length === 0 ? (
           <div className="empty-message">还没有访客来过。复制上方聊天邀请，发给第一位访客。</div>
         ) : null}
         {visitorContexts?.map(context => (
           <div className="context" key={context.contextId}>
             <header>
-              <strong>{context.peer}</strong>
+              <strong>{detail?.config.peers.find(p => p.name === context.peer)?.displayName ?? context.peer}</strong>
               <span className="chip">{new Date(context.lastTouchedAt).toLocaleString()}</span>
               {context.active > 0 ? <span className="chip ok">{context.active} 个任务进行中</span> : null}
               <span className="grow" />

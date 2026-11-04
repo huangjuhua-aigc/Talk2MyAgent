@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import type { DetectResult, HostState, KeyStatus } from './types.ts'
 import { credentialsPath, statePath } from './paths.ts'
 import { PROVIDERS } from './providers.ts'
+import { sandboxSupport } from './visitor-runtime.ts'
 
 /** Run a command briefly and report whether it answered, plus its output. */
 async function run(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
@@ -158,16 +159,13 @@ export async function detect(profile: string): Promise<DetectResult> {
   const nodeVersion = process.versions.node ?? ''
   const nodeMajor = Number(nodeVersion.split('.')[0] ?? '0')
   const dsh = await run('dsh', ['--version'])
-  const docker = await run('docker', ['--version'])
   const dump = await run('dsh', ['--profile', profile, '--dump-config'])
   return {
     node: { version: nodeVersion, ok: nodeMajor >= 22 },
     dsh: dsh.ok
       ? { installed: true, version: dsh.output.trim().split('\n')[0]?.slice(0, 80) }
       : { installed: false },
-    docker: docker.ok
-      ? { installed: true, version: docker.output.trim().split('\n')[0]?.slice(0, 80) }
-      : { installed: false },
+    sandbox: { ...sandboxSupport(), automatic: true },
     keys: await scanKeys(),
     lanIps: await detectLanIps(),
     profile: {

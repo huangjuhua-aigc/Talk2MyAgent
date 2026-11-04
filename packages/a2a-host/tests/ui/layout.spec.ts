@@ -45,8 +45,15 @@ for (const width of [1280, 820, 390]) {
     // Switching modes exposes only the applicable fields, and preserves work.
     await network.getByRole('radio', { name: /局域网地址/ }).check()
     await expect(host).toHaveCount(0)
+    const local = network.getByLabel('本机地址（IP:端口）')
+    await local.fill('127.0.0.1:4080')
+    await expectComfortableInput(local)
+    await expectNoPageOverflow(page)
+    await page.screenshot({ path: testInfo.outputPath(`network-lan-${width}.png`), fullPage: true })
     await network.getByRole('radio', { name: /公网中继/ }).check()
     await expect(host).toHaveValue('https://a-team-with-a-long-name.relay.example.com')
+    await expect(local).toHaveCount(0)
+    await expect(network.getByRole('spinbutton')).toHaveCount(0)
   })
 }
 
@@ -66,11 +73,17 @@ test('Relay host has a keyboard focus indicator and validates before advancing',
   await expect(host).toHaveAttribute('aria-invalid', 'true')
   await expect(network.getByRole('button', { name: '下一步 →' })).toBeDisabled()
   await host.fill('https://relay.example.com')
+  const number = network.getByLabel('手机号（公开编号）')
+  await expect(network.getByRole('button', { name: '下一步 →' })).toBeDisabled()
+  await number.fill('12812345678')
+  await expect(number).toHaveAttribute('aria-invalid', 'true')
+  await number.fill('18612345678')
+  await expect(network.getByText('https://relay.example.com/r/18612345678/a2a', { exact:true })).toBeVisible()
   await expect(network.getByRole('button', { name: '下一步 →' })).toBeEnabled()
   await network.getByRole('button', { name: '下一步 →' }).click()
   await expect(page.getByRole('heading', { name: '访客', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '复制配置指令' })).toHaveCount(0)
-  await expect(page.getByText('Relay 服务可访问后，还需保存并启动 Agent。请在控制台「公网中继」查看连接状态，显示「公网已上线」时即可复制聊天邀请。')).toBeVisible()
+  await expect(page.getByText('保存后进入控制台，可先获取固定地址并准备聊天邀请；启动 Agent 后，访客即可连接。')).toBeVisible()
 })
 
 test('Visitor settings use labelled fields and disclose long instructions on demand', async ({ page }, testInfo) => {

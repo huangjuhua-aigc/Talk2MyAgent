@@ -53,10 +53,11 @@ export async function ensureDaemon(dir) {
 }
 export async function configure(dir, config) { await ensureDaemon(dir); return await command(dir, 'configure', { config }) }
 export async function setEnabled(dir, enabled) { await ensureDaemon(dir); return await command(dir, 'enable', { enabled }) }
+export async function register(dir) { await ensureDaemon(dir); return await command(dir, 'register') }
 export async function status(dir) {
   try { return await command(dir, 'status') } catch (e) {
     if (!['ENOENT','ECONNREFUSED'].includes(e.code)) throw e
-    try { const s = JSON.parse(await readFile(join(dir, 'state.json'), 'utf8')); return { state: 'stopped', desiredEnabled: s.desiredEnabled,
+    try { const s = JSON.parse(await readFile(join(dir, 'state.json'), 'utf8')); return { ...s.registrations?.[s.config?.relayOrigin]?.info, state: 'stopped', desiredEnabled: s.desiredEnabled,
       cloudSyncPending: s.cloudSyncPending, relayOrigin: s.config?.relayOrigin, error: s.desiredEnabled ? 'Connector 未运行，开启发布可恢复' : undefined } } catch (e) { if (e.code !== 'ENOENT') throw e }
     return { state: 'unregistered', desiredEnabled: false, cloudSyncPending: false }
   }

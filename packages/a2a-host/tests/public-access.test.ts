@@ -6,10 +6,25 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { parse } from 'yaml'
 import { derivedPublicUrl, previewPublicUrl, resolveBindHost } from '../src/url.ts'
+import { parseLocalAddress } from '../web/src/localAddress.ts'
 import { buildPatchYaml } from '../src/files.ts'
-import { agentBriefingPath, agentManagementPath } from '../src/paths.ts'
+import { agentBriefingPath, agentManagementPath, agentWorkspacesPath } from '../src/paths.ts'
 import { fetchSnapshot, managementRequest } from '../src/monitor.ts'
 import type { WizardConfig } from '../src/types.ts'
+
+test('combined LAN addresses preserve IPv6 and HTTP default ports in listener configuration', () => {
+  for (const [input, host, port, endpoint] of [
+    ['127.0.0.1:80', '127.0.0.1', 80, 'http://127.0.0.1/a2a'],
+    ['http://127.0.0.1:4080/a2a', '127.0.0.1', 4080, 'http://127.0.0.1:4080/a2a'],
+    ['[::1]:4080', '::1', 4080, 'http://[::1]:4080/a2a'],
+  ] as const) {
+    const parsed = parseLocalAddress(input)
+    assert.deepEqual(parsed, { host, port })
+    const network = { mode: 'lan' as const, ...parsed! }
+    assert.equal(resolveBindHost(network, []), host)
+    assert.equal(derivedPublicUrl(network), endpoint)
+  }
+})
 
 test('normalizes HTTPS origins, RPC endpoints and proxy prefixes', () => {
   for (const [host, expected] of [
@@ -49,6 +64,8 @@ test('generates deny-all admission and a separate management endpoint', () => {
   const rows = parse(buildPatchYaml(config, 'TEST_ADMIN', 'test-agent'))[0].insert
   const plugin = rows.find((r: any) => r.id === 'a2a-server').config
   assert.deepEqual(plugin.trustedPeers, [])
+  assert.equal(plugin.isolation.execution, 'microsandbox')
+  assert.equal(plugin.isolation.privateRoot, agentWorkspacesPath('test-agent'))
   assert.equal(plugin.admin.socketPath, agentManagementPath('test-agent'))
   assert.equal(plugin.publicUrl, 'https://agent.example/a2a')
   assert.equal(plugin.briefing.settingsFile, agentBriefingPath('test-agent'))

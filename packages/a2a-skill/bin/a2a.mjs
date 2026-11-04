@@ -204,6 +204,8 @@ if (command === 'list') {
   const rpcUrl = httpUrl(url)
   if (cardUrl && httpUrl(cardUrl).origin !== rpcUrl.origin) fail('Card URL must use the same origin as the RPC URL')
   const contacts = loadContacts()
+  const previous = contacts.agents[name]
+  if (previous && previous.url !== url) fail(`contact "${name}" already points to another URL; choose a different contact ID after checking the invitation (existing contact was not changed)`)
   contacts.agents[name] = { url, token_env: tokenEnv, note: noteParts.join(' ') || undefined, ...(cardUrl ? { card_url: cardUrl } : {}) }
   saveContacts(contacts)
   console.log(`已保存联系人 ${name} → ${url}（令牌环境变量 ${tokenEnv}）。别忘了设置该环境变量。`)

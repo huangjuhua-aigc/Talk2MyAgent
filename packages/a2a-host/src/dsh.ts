@@ -8,9 +8,11 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { launchCommand } from './files.ts'
-import { agentPidPath } from './paths.ts'
+import { agentPidPath, dshHome, hostHome } from './paths.ts'
+import { dshCommand } from './dsh-command.ts'
 
 /** Kill one PID and its children; the tree matters on Windows. */
 function killTree(pid: number): void {
@@ -94,14 +96,20 @@ export class DshRunner {
     this.logs.push(`$ ${command} ${args.join(' ')}`)
     // Fully detached: killing the console (or its process tree) must NOT take
     // the online agent down — "close the console, the agent stays" is the
-    // product's promise. The price is no live stdout here; dsh writes its own
-    // logs under ~/.dsh/logs/.
-    const child = spawn(command, args, {
-      shell: process.platform === 'win32',
+    // product's promise. File-backed stdout preserves startup diagnostics
+    // without tying the child to a pipe owned by this console.
+    const invocation = dshCommand(args)
+    const logDir = join(hostHome(), 'logs')
+    mkdirSync(logDir, { recursive: true, mode: 0o700 })
+    const logPath = join(logDir, `${this.agentId}.log`)
+    const logFd = openSync(logPath, 'a', 0o600)
+    this.logs.push(`启动日志：${logPath}`)
+    let child: ChildProcess
+    try { child = spawn(invocation.command, invocation.args, {
       windowsHide: true,
       detached: true,
-      stdio: 'ignore',
-    })
+      stdio: ['ignore', logFd, logFd],
+    }) } finally { closeSync(logFd) }
     child.unref()
     child.on('close', (code) => {
       this.logs.push(`(dsh exited with code ${code ?? 'unknown'})`)
@@ -154,9 +162,24 @@ export class DshRunner {
 }
 
 /** Install the protocol plugin into the profile; resolves with the output. */
+export async function initializeWebProfile(profile: string): Promise<void> {
+  if (!/^[A-Za-z0-9_-]+$/.test(profile)) throw new Error('Invalid profile')
+  if (existsSync(join(dshHome(), 'profiles', profile, 'package.json'))) return
+  // --from-default-profile replaces the entire profile, including installed
+  // plugins. Materialize the template BEFORE installing any dependencies.
+  const result = await runDsh(['--profile', profile, '--from-default-profile', 'web', '--dump-default-config'])
+  if (!result.ok) throw new Error(`Agent 配置初始化失败：${result.output.slice(-2000)}`)
+}
+
 export async function installPlugin(profile: string, source: string): Promise<{ ok: boolean; output: string }> {
-  const child = spawn('dsh', ['plugin', '--profile', profile, 'add', source], {
-    shell: process.platform === 'win32',
+  await initializeWebProfile(profile)
+  return await runDsh(['plugin', '--profile', profile, 'add', source])
+}
+
+async function runDsh(args: string[]): Promise<{ ok: boolean; output: string }> {
+  const invocation = dshCommand(args)
+  const child = spawn(invocation.command, invocation.args, {
+    windowsHide: true,
   })
   let output = ''
   return await new Promise((resolve) => {
@@ -164,8 +187,8 @@ export async function installPlugin(profile: string, source: string): Promise<{ 
       child.kill()
       resolve({ ok: false, output: `${output}\n(timed out)` })
     }, 120_000)
-    child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString() })
-    child.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString() })
+    child.stdout?.on('data', (chunk: Buffer) => { output = (output + chunk.toString()).slice(-16_000) })
+    child.stderr?.on('data', (chunk: Buffer) => { output = (output + chunk.toString()).slice(-16_000) })
     child.on('error', (error) => {
       clearTimeout(timer)
       resolve({ ok: false, output: `${output}\n${String(error)}` })

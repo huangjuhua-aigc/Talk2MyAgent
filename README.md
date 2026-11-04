@@ -2,9 +2,11 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-Portal 与调用技能当前版本为 **0.2.0**。已加入[公网中继](docs/relay.md)：Portal 可自动注册、后台连接并复制访客聊天邀请，支持维护者提供的默认 Relay 和自定义 host。此功能需要单独部署 [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server)；尚未内置真实官方地址。
+Portal 使用已发布的 `dsh-a2a-server 0.4.0`：自动准备 Microsandbox，每位访客独立沙箱，公共资料只读、私有文件持久保存，空闲 30 秒暂停、10 分钟停止。无需手动安装 Docker；系统虚拟化未开启时会提示操作。源码测试可以设置 `A2A_PLUGIN_SOURCE`，正常使用无需设置。详见[本地开发版安装](docs/relay.md#本地开发版安装)和[沙箱指南](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.md)。
 
-本版还更新了 Portal 布局：主页四个区块可折叠并按 Agent 记忆状态，Relay 地址输入框加宽，启动前检查端口占用。调用技能支持完整中继名片地址，并修复了 `GetTask` 任务查询解析；[技能更新记录](packages/a2a-skill/CHANGELOG.md)。
+Portal 与调用技能当前版本为 **0.2.0**。已加入[公网中继](docs/relay.md)：Portal 默认使用 **https://relay.creez.cn**，可自动注册、后台连接并复制访客聊天邀请，无需自行部署中继。也支持自建 [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server)，在 Portal 选择自定义 host；维护者可通过 `A2A_RELAY_DEFAULT_HOST` 覆盖默认入口。
+
+Portal 支持先保存 Agent、获取固定中继地址和准备邀请，再启动自动上线。独立的“邀请访客聊天”区域可通过加号添加姓名和 Token；主页五个区块均可折叠并按 Agent 记忆状态，启动前检查端口占用。调用技能支持完整中继名片地址，并修复了 `GetTask` 任务查询解析；[技能更新记录](packages/a2a-skill/CHANGELOG.md)。
 
 把本地资料开放给获准的 A2A 访客。你的在线 agent 可以聊天、读取你指定工作目录中的文本，并根据本地项目记忆自动更新公开简报；你在本机 Portal 配置模型、访客和资料目录，查看来访记录。
 
@@ -44,7 +46,7 @@ pnpm --filter @talk2myagent/a2a-host start
 
 浏览器会打开本机 Portal：[http://127.0.0.1:17890](http://127.0.0.1:17890)。这个地址只用于主人管理，不发给访客。
 
-本指南使用 `dsh-a2a-server@0.3.0`，包含指定目录读取、私有主人入口和自动简报开关。完成下一步的插件安装后再启动 agent。插件的[中文说明](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md)、[英文说明](https://github.com/huangjuhua-aigc/dsh-a2a)和[更新日志](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.zh-CN.md)可单独查阅。
+本指南使用 `dsh-a2a-server@0.4.0`，包含指定目录读取、私有主人入口和自动简报开关。完成下一步的插件安装后再启动 agent。插件的[中文说明](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md)、[英文说明](https://github.com/huangjuhua-aigc/dsh-a2a)和[更新日志](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.zh-CN.md)可单独查阅。
 
 ### 3. 在向导里保存配置
 
@@ -53,7 +55,7 @@ pnpm --filter @talk2myagent/a2a-host start
 | 环境检测 | 确认 Node 和 dsh 可用 |
 | 名片 | 首次示例取名 `my-agent`，描述你允许访客查询的内容 |
 | 模型 | 选择服务商和模型，填写或沿用 API Key |
-| 网络 | 先选「自定义地址」，填写 `127.0.0.1`，端口 `3080`；先完成本机验证，稍后切到 Tailscale HTTPS 地址 |
+| 网络 | 本机验证选「局域网」，本机地址填 `127.0.0.1:3080`；跨网络选「公网中继」，参见[中继配置](docs/relay.md) |
 | 访客 | 每位访客使用独立令牌，勾选「允许对话和读取指定工作目录」 |
 | 工作区 | 选择愿意向这些访客提供的本地资料目录 |
 | 保存启动 | 先点「保存」，完成下面的插件安装，再点「启动」 |
@@ -68,7 +70,7 @@ pnpm --filter @talk2myagent/a2a-host start
 
 ```sh
 dsh --profile a2a-my-agent --from-default-profile web --dump-config
-dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.3.0
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.0
 ```
 
 `--dump-config` 在这里用于初始化 Web profile 并输出配置，不启动监听服务。安装失败时先按提示修复，不继续启动。然后回 Portal 点「启动」→「进入控制台」。已有部署升级时，先停止 agent，更新原有 profile 的插件，再从 Portal 启动；详见[升级步骤](docs/guide.md#升级)。
@@ -83,6 +85,8 @@ curl http://127.0.0.1:3080/.well-known/agent-card.json
 
 ## 用 Tailscale 跨网络访问
 
+> 此节保留旧版自定义直连配置的运维说明。新版向导只提供公网中继和局域网，不再提供自定义直连地址入口；已有配置继续兼容。首次跨网络接入请使用[公网中继](docs/relay.md)。
+
 推荐使用 **Tailscale Serve + HTTPS**。它把获准设备的请求转发到本机 agent，双方不需要同一 Wi-Fi，也不需要公网 IP 或购买域名。Serve 的访问范围是获准的 Tailscale 设备；公网开放是另外的 Funnel 功能，本教程使用 Serve。[Tailscale Serve 官方说明](https://tailscale.com/docs/features/tailscale-serve)
 
 1. **两端安装并登录 Tailscale。** 自己的两台设备加入同一 tailnet；给朋友使用时，在 Tailscale 管理后台共享 agent 所在设备，让朋友用自己的账号接受共享。双方客户端保持连接。安装和共享的逐步说明见[详细教程](docs/tailscale.md#1-两端安装并连接-tailscale)。
@@ -96,7 +100,7 @@ curl http://127.0.0.1:3080/.well-known/agent-card.json
    ```
 
    首次使用按命令提示启用 HTTPS。先检查 `status`；若 443 已被其他 Serve/Funnel 配置使用，先看[端口冲突说明](docs/tailscale.md#2-只转发-a2a-接口)。本例只转发 A2A 和名片，不转发整个 DSH Web 服务或 Portal 的 `17890` 端口。[命令参考](https://tailscale.com/docs/reference/tailscale-cli/serve)
-3. **回填外部地址。** 从 `status` 复制实际 HTTPS 地址，例如 `https://my-pc.example-tailnet.ts.net`。Portal →「编辑配置」→「网络」→「自定义地址」填这个完整地址，保留 `https://`；本地端口仍是 `3080`。保存后停止并重新启动 agent。Portal 自动补齐 `/a2a`，HTTPS 域名模式默认保持本地回环监听。
+3. **核对已有外部地址。** 从 `status` 获取实际 HTTPS 地址，例如 `https://my-pc.example-tailnet.ts.net`，确认与已保存的旧版直连配置一致，本地监听仍是 `127.0.0.1:3080`。新版 Portal 不再提供此地址的编辑入口；需要新建连接时使用公网中继。
 4. **在另一网络验证。** 让另一台电脑切到手机热点，连接 Tailscale，按[访客验证步骤](docs/tailscale.md#4-在另一网络验证并开始对话)读取名片并携带访客令牌发送消息。
 
 访客最终使用的 URL 形如 `https://my-pc.example-tailnet.ts.net/a2a`；请用自己的实际地址替换示例。浏览器直接打开 `/a2a` 不会显示聊天页面，它是 A2A RPC 接口。访客可使用自己的 A2A 客户端，或仓库内的 `packages/a2a-skill/bin/a2a.mjs`。

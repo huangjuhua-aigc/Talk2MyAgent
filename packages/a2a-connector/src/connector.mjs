@@ -5,6 +5,8 @@ import { isIP } from 'node:net'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import WebSocket from 'ws'
 import { LIMIT, originOf, decodeFrame, bytesOf, headersOf, wire, sameSession, readLimited, adaptCard } from '@talk2myagent/a2a-relay-protocol'
+const isContactId = value => typeof value === 'string' && /^1[3-9]\d{9}$/.test(value)
+const contactMessages = { CONTACT_ID_TAKEN: '该手机号编号已被占用，请填写其他号码。', CONTACT_ID_IMMUTABLE: '该 Agent 的公网编号已固定，不能更改。' }
 
 export function localTarget(input) {
   const u = new URL(input), host = u.hostname.replace(/^\[|\]$/g, '')
@@ -34,7 +36,11 @@ export async function control(origin, path, token, method = 'GET', body) {
     const req = (url.protocol === 'https:' ? https : http).request(url, { method, timeout: 8000, maxHeaderSize: LIMIT.headers,
       headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(data ? { 'content-type': 'application/json', 'content-length': data.length } : {}) } }, res => {
       void readLimited(res, LIMIT.body).then(buffer => {
-        if (res.statusCode !== 200) throw Object.assign(new Error(`Relay control HTTP ${res.statusCode}`), { status: res.statusCode })
+        if (res.statusCode !== 200) {
+          let code
+          try { code = JSON.parse(buffer.toString()).code } catch { /* generic status below */ }
+          throw Object.assign(new Error(Object.hasOwn(contactMessages, code) ? contactMessages[code] : `Relay control HTTP ${res.statusCode}`), { status: res.statusCode, ...(Object.hasOwn(contactMessages, code) ? { code } : {}) })
+        }
         resolve(JSON.parse(buffer.toString()))
       }).catch(reject)
     })
@@ -44,6 +50,7 @@ export async function control(origin, path, token, method = 'GET', body) {
 export class Connector {
   constructor({ config, state, save, onStatus = () => {} }) {
     this.config = { ...config, relayOrigin: originOf(config.relayOrigin, config.allowHttp) }
+    if (config.contactId !== undefined && !isContactId(config.contactId)) throw new Error('请填写有效的 11 位手机号作为公开编号')
     localTarget(config.localRpcUrl); localTarget(config.localCardUrl)
     if (new URL(config.localRpcUrl).origin !== new URL(config.localCardUrl).origin) throw new Error('Local RPC and Agent Card must use the same origin')
     this.state = state; this.save = save; this.onStatus = onStatus; this.stopped = false; this.flows = new Map(); this.attempt = 0; this.heals = { endpoint: 0, identity: 0 }
@@ -60,16 +67,20 @@ export class Connector {
       if (this.stopped) throw Object.assign(new Error('Connector stopped'), { stopped: true })
     }
     this.registration = registration
-    if (!registration.info) {
+    if (registration.info && this.config.contactId && registration.info.contactId !== this.config.contactId) throw Object.assign(new Error(contactMessages.CONTACT_ID_IMMUTABLE), { status: 409, code: 'CONTACT_ID_IMMUTABLE' })
+    if (!registration.info || !isContactId(registration.info.contactId) || this.config.contactId && registration.info.publicRpcUrl !== `${origin}/r/${this.config.contactId}/a2a`) {
       this.status('registering')
       let info
       try {
-        info = await control(origin, '/v1/agents/register', undefined, 'POST', { registrationId: registration.registrationId,
-        deviceTokenHash: createHash('sha256').update(registration.token).digest('hex'), displayName: this.config.displayName, protocolVersion: '1.0' })
+        // Existing devices can refresh metadata even while new registrations are closed.
+        info = registration.info ? await control(origin, '/v1/publication', registration.token)
+          : await control(origin, '/v1/agents/register', undefined, 'POST', { registrationId: registration.registrationId,
+            deviceTokenHash: createHash('sha256').update(registration.token).digest('hex'), displayName: this.config.displayName, protocolVersion: '1.0',
+            ...(this.config.contactId ? { contactId: this.config.contactId } : {}) })
       } catch (error) {
         // 409 here means the relay holds this registrationId under another credential
         // (e.g. a restored backup); mint a fresh identity once instead of blocking forever.
-        if (error?.status === 409) error.heal = 'identity'
+        if (!registration.info && error?.status === 409 && !error.code) error.heal = 'identity'
         throw error
       }
       // A stop/reset may have happened during the network call: never write into reset state.
@@ -77,6 +88,14 @@ export class Connector {
       const expected = `/r/${info.publicationId}`
       if (!/^[a-zA-Z0-9_-]{16,80}$/.test(info.publicationId) || info.publicRpcUrl !== `${origin}${expected}/a2a` ||
           info.publicCardUrl !== `${origin}${expected}/.well-known/agent-card.json` || info.connectUrl !== `${origin.replace(/^http/, 'ws')}/v1/connect`) throw new Error('Relay returned inconsistent endpoints')
+      if (!isContactId(info.contactId)) throw new Error('Relay 未返回有效通讯录编号，请升级 Relay 服务后重试')
+      if (registration.info && info.publicationId !== registration.info.publicationId) throw new Error('Relay changed the registered identity')
+      if (this.config.contactId) {
+        if (info.contactId !== this.config.contactId) throw new Error('Relay 返回的编号与填写的手机号不一致')
+        const address = `${origin}/r/${info.contactId}`
+        if (info.contactRpcUrl !== `${address}/a2a` || info.contactCardUrl !== `${address}/.well-known/agent-card.json`) throw new Error('Relay 不支持手机号地址，请先升级 Relay 服务')
+        info = { ...info, publicRpcUrl: info.contactRpcUrl, publicCardUrl: info.contactCardUrl }
+      }
       registration.info = info; await this.save()
     }
     return registration
@@ -139,7 +158,7 @@ export class Connector {
       }, 50)
       return
     }
-    if ([401,403,409].includes(error?.status)) { this.status('blocked', 'Relay 拒绝设备凭据或发布意图，请检查服务端状态'); return }
+    if ([401,403,409].includes(error?.status)) { this.status('blocked', Object.hasOwn(contactMessages, error?.code) ? contactMessages[error.code] : 'Relay 拒绝设备凭据或发布意图，请检查服务端状态'); return }
     this.status('reconnecting', error?.message ?? 'Connector disconnected')
     clearTimeout(this.retryTimer)
     this.retryTimer = setTimeout(() => { void this.start() }, Math.min(30000, 500 * 2 ** Math.min(this.attempt++, 6)) + Math.random() * 250)

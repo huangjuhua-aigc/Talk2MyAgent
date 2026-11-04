@@ -1,6 +1,6 @@
 # Talk2MyAgent 使用指南
 
-本指南说明首次配置之后怎样使用和维护在线 agent。首次下载、构建与安装插件从 [README](../README.md#首次安装与启动)开始；不同网络的设备接入见 [Tailscale 教程](tailscale.md)。English setup and usage: [English README](../README.en.md).
+本指南说明首次配置之后怎样使用和维护在线 agent。首次下载、构建与安装插件从 [README](../README.md#首次安装与启动)开始；不同网络的设备接入见[公网中继](relay.md)。English setup and usage: [English README](../README.en.md).
 
 ## 1. 先分清三个入口
 
@@ -25,7 +25,7 @@ pnpm --filter @talk2myagent/a2a-host start
 1. **环境检测**：确认 Node.js 22+、dsh 和模型凭据。按 README 为 agent 的 profile 安装配套 `dsh-a2a-server@0.3.0`。
 2. **名片**：填写名字和描述。只描述实际开放的能力，例如“读取这个项目的代码和公开简报”。
 3. **模型**：选择服务商、模型，填写 API Key，或沿用检测到的凭据。可配置备用模型，但当前选中的模型决定执行请求所用的配置。
-4. **网络**：首次本机验证选「自定义地址」填 `127.0.0.1`、端口 `3080`；跨网络按 [Tailscale 教程](tailscale.md)建立路径转发后改填完整 HTTPS 地址。
+4. **网络**：首次本机验证选「局域网」，本机地址填 `127.0.0.1:3080`；同网设备访问时选择本机网卡地址。端口直接写在地址后面。跨网络选择「公网中继」，按[中继教程](relay.md)配置。
 5. **访客**：为每位访客设置不同的名字和令牌，勾选允许对话和读取指定工作目录。未勾选的访客不能调用 agent；全部取消表示无人获准。
 6. **工作区**：选择本地的绝对目录。这是获准访客可读取的资料范围。
 7. **保存启动**：点击「保存」，为对应 profile 安装 `dsh-a2a-server@0.3.0`，再点「启动」和「进入控制台」。安装命令见 [README](../README.md#4-安装插件并启动-agent)。
@@ -36,19 +36,19 @@ pnpm --filter @talk2myagent/a2a-host start
 
 ### 只在本机测试
 
-自定义地址填 `127.0.0.1`，端口填 `3080`。本机客户端使用 `http://127.0.0.1:3080/a2a`。另一台电脑的 `127.0.0.1` 指向它自己，不能用来访问你的 agent。
+选择「局域网」，本机地址填 `127.0.0.1:3080`。本机客户端使用 `http://127.0.0.1:3080/a2a`。另一台电脑的 `127.0.0.1` 指向它自己，不能用来访问你的 agent。
 
 ### 跨网络访问
 
-按照 [Tailscale 教程](tailscale.md)完成两端安装、设备授权、路径转发和 HTTPS 地址回填。采用该教程时，agent 的本地监听保持 `127.0.0.1:3080`，外部地址形如 `https://my-pc.example-tailnet.ts.net/a2a`。
+按照[公网中继教程](relay.md)选择默认或自建 Relay。保存 Agent 后进入控制台，点“获取中继地址”，即可提前准备邀请；之后启动 Agent 自动连接同一路径。外部地址形如 `https://relay.example.com/r/<发布ID>/a2a`。在“邀请访客聊天”下方点加号可添加姓名和 Token；运行中新增访客需“重启并应用”，原有访客连接不因添加而断开。
 
-换网络不会把 `192.168.x.x` 自动变成公网地址。Tailscale 的 `100.x` 直连与 HTTPS Serve 是两种配置，不要混填；对应的监听规则和故障排查见教程。
+换网络不会把 `192.168.x.x` 自动变成公网地址；本地 Agent、Connector 和 Relay 都需要在线。
 
 ### 已有局域网或公网部署
 
-局域网模式会绑定你选择的本机网卡 IP。它适用于同网段的受信任设备，会暴露这个 DSH Web 监听器；跨网络接待指定访客优先用路径受限的 Tailscale Serve。
+局域网模式会绑定你选择的本机网卡 IP，地址形如 `192.168.1.10:3080`。它适用于同网段的受信任设备，会暴露这个 DSH Web 监听器。
 
-已有 HTTPS 域名和反向代理时，自定义地址填完整 HTTPS URL，代理只允许 A2A RPC 与名片路径。当前产品不自动安装隧道、不管理域名，也不转发 Portal。
+旧版自定义直连配置继续兼容，但新版向导不再提供其编辑入口。相关 Tailscale 部署的运维说明保留在[旧版教程](tailscale.md)。当前产品不管理域名，也不转发 Portal。
 
 网络配置更改后，保存并重启 agent。随后从真正的访客设备读取 Agent Card，确认其中 `supportedInterfaces` 的地址已经变成外部可用 URL，再发起带令牌对话。
 
@@ -100,6 +100,7 @@ pnpm --filter @talk2myagent/a2a-host start monitor my-agent
 | `~/.a2a/agents/<id>.json` | 保存的 agent 配置，包含 profile、访客和管理凭据；作为私有文件保存 |
 | `~/.a2a/agents/<id>.patch.yml` | 自动生成的运行配置，模型与访客凭据使用引用 |
 | `~/.a2a/briefings/<id>.json` | 自动简报开关，文件不存在时默认开启 |
+| `~/.a2a/workspaces/<id>/<peer>/` | 公共资料之外的访客私有工作区；只给该访客挂载 |
 | `~/.dsh/.credentials.yaml` | dsh 凭据；Portal 写入 `refs`，修改前备份 |
 | `<工作区>/.hop/handoff.md` | 向访客提供的正式简报 |
 | `~/.dsh-a2a/` | 插件默认的私有状态、会话和执行时间等 |
@@ -107,6 +108,8 @@ pnpm --filter @talk2myagent/a2a-host start monitor my-agent
 `A2A_HOST_HOME`、`DSH_HOME` 可覆盖前两个应用的主目录。不要把这些配置、凭据或会话状态复制进公开仓库。
 
 获准访客默认可以通过 `read_file` 读取指定 `workspaceRoot` 中的 UTF-8 文本和目录列表；单文件上限 2 MiB。路径经过真实路径校验，拒绝越界、符号链接/junction、硬链接和 Windows ADS，并排除插件自身状态目录。写入、命令、联网和跨会话工具不向访客开放。
+
+开发版使用插件 0.4.0 的 Microsandbox。点击启动后自动检查/更新插件、下载沙箱组件和固定镜像并显示进度，无需手动安装 Docker。每位访客首次工具调用创建独立 VM，公共资料副本只读、私有磁盘可读写；聊天记录和凭据不挂载。空闲 30 秒暂停、10 分钟停止，私有文件保留。每个后端最多 4 个驻留 VM。系统虚拟化功能若未启用，仍需用户开启并重启。详见[安装与迁移](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.md)。0.4.0 尚未发布 npm，开发时把 `A2A_PLUGIN_SOURCE` 设为已构建插件的绝对路径。
 
 确需给不同访客指定不同目录时，核心支持 `config.isolation.peerWorkspaces`；目前在保存的 agent JSON 中设置后从 Portal 重启生效，向导没有逐访客目录选择器。未覆盖的访客继续使用默认资料目录。单纯改变 cwd 或 `read-only` 沙箱不等于操作系统级读取隔离。
 

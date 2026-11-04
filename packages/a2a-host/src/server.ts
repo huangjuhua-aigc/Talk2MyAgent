@@ -28,12 +28,17 @@ import { DshRunner, installPlugin } from './dsh.ts'
 import { fetchSnapshot } from './monitor.ts'
 import { automaticBriefingEnabled, setAutomaticBriefing } from './briefing.ts'
 import { resolveBindHost } from './url.ts'
+import { prepareAgentWorkspaces } from './isolation.ts'
+import { requireVisitorRuntime, visitorPluginSource } from './visitor-runtime.ts'
 import { assertPortAvailable } from './ports.ts'
+import { waitForAgentReady } from './readiness.ts'
+import { stopAgent } from './stop-agent.ts'
 import { pickDirectory } from './pick.ts'
 import { agentPatchPath, agentManagementPath } from './paths.ts'
-import type { WizardConfig } from './types.ts'
+import type { WizardConfig, StartupProgress } from './types.ts'
 import { randomBytes } from 'node:crypto'
-import { defaultRelayHost, invitation, publicationStatus, publish, recordRuntime, resetPublicationIdentity, stopPublication, validateSharedRoots } from './publication.ts'
+import { appliedVisitors, defaultRelayHost, invitation, publicationStatus, publish, requestPublication, recordRuntime, resetPublicationIdentity, stopPublication, validateSharedRoots } from './publication.ts'
+import { newVisitor } from './visitors.ts'
 
 /** Fixed by design: the vite dev proxy expects this port. */
 const PORT = Number(process.env['A2A_HOST_PORT'] ?? 17890)
@@ -54,6 +59,7 @@ const webDist = join(import.meta.dirname, '..', 'web', 'dist')
 
 /** One resident runner per agent id, lazily created. */
 const runners = new Map<string, DshRunner>()
+const preparations = new Map<string, StartupProgress>()
 const runnerFor = (id: string): DshRunner => {
   let runner = runners.get(id)
   if (runner === undefined) {
@@ -125,7 +131,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   if (route === 'POST /api/ensure-plugin') {
     // The detection screen installs the protocol plugin proactively; a
     // nonexistent profile is created by `dsh plugin add` itself.
-    const result = await installPlugin('a2a', 'dsh-a2a-server')
+    const result = await installPlugin('a2a', visitorPluginSource())
     json(res, 200, result)
     return
   }
@@ -174,34 +180,50 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     json(res, 200, await publicationStatus(id)); return
   }
   if (sub === 'publication/reset' && req.method === 'POST') {
-    const updated: AgentRecord = record.config.network.relay?.enabled
+    const updated: AgentRecord = record.config.network.relay?.enabled || record.config.network.relay?.contactId
       ? { ...record, config: { ...record.config, network: { ...record.config.network, relay: { ...record.config.network.relay, enabled: false } } }, updatedAt: new Date().toISOString() }
       : record
+    if (updated !== record && updated.config.network.relay) delete updated.config.network.relay.contactId
     if (updated !== record) await saveAgent(updated)
     json(res, 200, await resetPublicationIdentity(id)); return
   }
   if (sub === 'publication/invitation' && req.method === 'POST') {
     const body = await readBody(req) as { peerName: string }
-    json(res, 200, await invitation(record, body.peerName)); return
+    json(res, 200, await invitation(record, body.peerName, runner.running)); return
   }
   if ((sub === 'publication/config' || sub === 'publication/enabled') && req.method === 'PUT') {
-    const body = await readBody(req) as { enabled?: unknown; provider?: unknown; host?: unknown }
+    const body = await readBody(req) as { enabled?: unknown; provider?: unknown; host?: unknown; contactId?: unknown }
     if (typeof body.enabled !== 'boolean') { json(res, 400, { error: 'enabled must be a boolean' }); return }
     if (body.provider !== undefined && !['default', 'custom'].includes(String(body.provider))) { json(res, 400, { error: 'Invalid Relay provider' }); return }
     if (body.host !== undefined && typeof body.host !== 'string') { json(res, 400, { error: 'Invalid Relay host' }); return }
+    if (body.contactId !== undefined && (typeof body.contactId !== 'string' || !/^1[3-9]\d{9}$/.test(body.contactId))) { json(res, 400, { error: '请填写有效的 11 位手机号作为公开编号' }); return }
     await validateSharedRoots(record.config)
     const previous = record.config.network.relay
     const relay = { provider: (body.provider ?? previous?.provider ?? 'default') as 'default' | 'custom',
-      host: (body.host ?? previous?.host ?? '') as string, enabled: body.enabled }
+      host: (body.host ?? previous?.host ?? '') as string, enabled: body.enabled,
+      ...((body.contactId ?? previous?.contactId) ? { contactId: (body.contactId ?? previous?.contactId) as string } : {}) }
+    const current = await publicationStatus(id)
+    const origin = (relay.provider === 'custom' ? relay.host : defaultRelayHost()).replace(/\/$/, '')
+    if (relay.contactId && current.relayOrigin === origin && current.contactId && relay.contactId !== current.contactId) { json(res, 409, { error: '该 Agent 的公网编号已固定，不能更改。' }); return }
     if (!body.enabled || relay.provider !== previous?.provider || relay.host !== previous?.host) await stopPublication(id)
     const updated: AgentRecord = { ...record, config: { ...record.config, network: { ...record.config.network, mode: 'relay', relay } }, updatedAt: new Date().toISOString() }
     await saveAgent(updated)
-    json(res, 200, body.enabled ? await publish(updated) : await publicationStatus(id)); return
+    json(res, 200, body.enabled ? await requestPublication(updated, runner.running) : await publicationStatus(id)); return
   }
 
   if (sub === '' && req.method === 'GET') {
-    json(res, 200, { ...record, running: runner.running })
+    json(res, 200, { ...record, running: runner.running, appliedPeers: await appliedVisitors(record) })
     return
+  }
+
+  if (sub === 'visitors' && req.method === 'POST') {
+    const body = await readBody(req) as { displayName?: unknown; token?: unknown }
+    let peer
+    try { peer = newVisitor(record, body) } catch (error) { json(res, 400, { error: (error as Error).message }); return }
+    await validateSharedRoots(record.config)
+    await saveAgent({ ...record, config: { ...record.config, peers: [...record.config.peers, peer] }, updatedAt: new Date().toISOString() })
+    // Additive only: existing visitors stay online; the new identity is applied on next start.
+    json(res, 200, { peer: { name: peer.name, displayName: peer.displayName }, requiresRestart: runner.running }); return
   }
 
   if (sub === '' && (req.method === 'PUT' || req.method === 'POST')) {
@@ -225,7 +247,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 
   if (sub === '' && req.method === 'DELETE') {
     await stopPublication(id)
-    await runner.stop()
+    await stopAgent(record, runner)
     await deleteAgentFiles(id)
     runners.delete(id)
     json(res, 200, { deleted: id })
@@ -249,7 +271,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   if (sub === 'install' && req.method === 'POST') {
     const { extraPackages } = await import('./files.ts')
     const body = await readBody(req) as { sources?: string[] }
-    const sources = body.sources ?? ['dsh-a2a-server', ...extraPackages(record.config)]
+    const sources = body.sources ?? [visitorPluginSource(), ...extraPackages(record.config)]
     const results: { source: string; ok: boolean; output: string }[] = []
     for (const source of sources) {
       results.push({ source, ...await installPlugin(record.profile, source) })
@@ -259,6 +281,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
 
   if (sub === 'start' && req.method === 'POST') {
+    preparations.set(id, { phase: 'checking', message: '正在检查启动环境…' })
+    try {
     await validateSharedRoots(record.config)
     // Belt and braces: if the plugin is missing (a fresh profile, or a
     // family beyond the detection screen's default profile), install it
@@ -268,29 +292,45 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     const bindHost = resolveBindHost(record.config.network, detected.lanIps)
     const bind = { host: bindHost, port: record.config.network.port }
     if (!runner.running) await assertPortAvailable(bind)
-    if (!detected.profile.pluginInstalled) {
-      await installPlugin(record.profile, 'dsh-a2a-server')
+    if (!runner.running) {
+      await requireVisitorRuntime(record.profile, { onProgress: progress => preparations.set(id, progress) })
+      for (const pkg of extraPackages(record.config)) {
+        const result = await installPlugin(record.profile, pkg)
+        if (!result.ok) throw new Error(`模型插件安装失败：${result.output.slice(-2000)}`)
+      }
+      await prepareAgentWorkspaces(record)
     }
-    for (const pkg of extraPackages(record.config)) {
-      await installPlugin(record.profile, pkg)
-    }
-    const firstTime = !detected.profile.exists
+    // The installer has already initialized the web profile. Reapplying the
+    // template here would erase the plugin we just installed.
+    const firstTime = false
     await refreshAgentPatch(record)
+    preparations.set(id, { phase: 'launching', message: '沙箱环境已就绪，正在启动 Agent…' })
     const started = runner.start(record.profile, firstTime, agentPatchPath(id), bind)
+    try {
+      await waitForAgentReady(bind, { isRunning: () => runner.running })
+    } catch (error) {
+      if (started) runner.stop()
+      throw error
+    }
     if (started) await recordRuntime(record, bind)
     if (record.config.network.mode === 'relay' && record.config.network.relay?.enabled !== false) await publish(record)
+    preparations.set(id, { phase: 'ready', message: 'Agent 已就绪' })
     json(res, 200, { started, manual: runner.manualCommand(record.profile, firstTime, agentPatchPath(id), bind) })
+    } catch (error) {
+      preparations.set(id, { phase: 'error', message: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
     return
   }
 
   if (sub === 'stop' && req.method === 'POST') {
     await stopPublication(id)
-    json(res, 200, { stopped: runner.stop() })
+    json(res, 200, { stopped: await stopAgent(record, runner) })
     return
   }
 
   if (sub === 'status' && req.method === 'GET') {
-    json(res, 200, { running: runner.running, logs: runner.tail() })
+    json(res, 200, { running: runner.running, logs: runner.tail(), preparation: preparations.get(id) })
     return
   }
 
@@ -359,7 +399,7 @@ export async function serve(): Promise<number> {
     if (!allowedHosts.includes(req.headers.host ?? '') || origin !== undefined && !allowedHosts.some(host => origin === `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site') {
       json(res, 403, { error: 'Local same-origin access required' }); return
     }
-    if (!['GET','HEAD'].includes(req.method ?? 'GET') && req.headers['x-a2a-csrf'] !== csrfToken && (origin !== undefined || req.headers['sec-fetch-site'] !== undefined || req.url?.includes('/publication/'))) {
+    if (!['GET','HEAD'].includes(req.method ?? 'GET') && req.headers['x-a2a-csrf'] !== csrfToken && (origin !== undefined || req.headers['sec-fetch-site'] !== undefined || req.url?.includes('/publication/') || req.url?.endsWith('/visitors'))) {
       json(res, 403, { error: 'Local session token required' }); return
     }
     if (!['GET','HEAD'].includes(req.method ?? 'GET') && (Number(req.headers['content-length'] ?? 0) > 0 || req.headers['transfer-encoding']) && !req.headers['content-type']?.startsWith('application/json')) {
@@ -368,7 +408,7 @@ export async function serve(): Promise<number> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     if (url.pathname.startsWith('/api/')) {
       const run = (): Promise<void> => api(req, res, url).catch((error: unknown) => {
-        json(res, 500, { error: String(error) })
+        json(res, 500, { error: error instanceof Error ? error.message : String(error) })
       })
       if (req.method === 'GET') void run()
       else {

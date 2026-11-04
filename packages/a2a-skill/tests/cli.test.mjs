@@ -173,3 +173,18 @@ test('C11 reflected credentials are redacted from RPC and card errors', () => wi
     })
   }
 }))
+
+test('C12 numeric Agent IDs support normal calls and reject conflicting addresses without overwriting contacts', () => withFixture(async ({ cli, root, url }) => {
+  for (const id of ['13800000001', '13900000001']) {
+    await cli(['add', id, url, 'A2A_TEST_TOKEN', '数字 ID Agent'])
+    await cli(['add', id, url, 'A2A_TEST_TOKEN', '改名后的 Agent'])
+    assert.match((await cli(['card', id])).stdout, /Fixture agent/)
+    assert.match((await cli(['send', id, '编号邀请验证'])).stdout, /编号邀请验证/)
+    await assert.rejects(cli(['add', id, 'https://different.test/a2a', 'A2A_OTHER_TOKEN', 'Conflicting Agent']), error => {
+      assert.match(error.stderr, /already points to another URL/); return error.code !== 0
+    })
+    const saved = JSON.parse(await readFile(join(root, 'contacts.json'), 'utf8')).agents[id]
+    assert.equal(saved.url, url); assert.equal(saved.token_env, 'A2A_TEST_TOKEN')
+    assert.equal(saved.note, '改名后的 Agent')
+  }
+}))

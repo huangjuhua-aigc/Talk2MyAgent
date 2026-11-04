@@ -2,7 +2,11 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-Portal and the calling skill are now **0.2.0**. [Public relay](docs/relay.en.md) is available: Portal registers and connects automatically, then generates visitor chat invitations. It supports an operator-provided default Relay and custom hosts. Deploy [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server) separately; no real official endpoint is bundled yet.
+Portal uses the published `dsh-a2a-server 0.4.0` with automatically prepared Microsandbox: one VM per visitor, read-only public data and persistent private files. Idle VMs pause after 30 seconds and stop after 10 minutes. Docker is not required; unavailable system virtualization produces an actionable message. Set `A2A_PLUGIN_SOURCE` only for local development. See [local development installation](docs/relay.en.md#local-development-installation) and the [sandbox guide](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.en.md).
+
+Portal and the calling skill are now **0.2.0**. [Public relay](docs/relay.en.md) defaults to **https://relay.creez.cn**: Portal registers and connects automatically, then generates visitor chat invitations without requiring you to deploy a relay. You can also self-host [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server) and select a custom host in Portal. Operators can override the default with `A2A_RELAY_DEFAULT_HOST`.
+
+You can save an Agent, reserve its stable Relay URL and prepare invitations before starting it; startup then connects automatically at that URL. The separate visitor invitation card includes a plus button for adding a visitor's name and token. All five dashboard cards can collapse. New visitors added while running take effect after restarting the Agent.
 
 This version adds collapsible dashboard cards with per-agent preferences, wider Relay address inputs and a port-availability check before startup. The calling skill supports complete Relay Card URLs and fixes `GetTask` response parsing; see its [changelog](packages/a2a-skill/CHANGELOG.md).
 
@@ -23,7 +27,7 @@ pnpm --version
 dsh --version
 ```
 
-This guide uses `dsh-a2a-server@0.3.0`, compatible with DSH `>=0.2.1-rc.2 <0.3.0`. Treat version compatibility errors as installation failures. Plugin documentation: [English](https://github.com/huangjuhua-aigc/dsh-a2a), [简体中文](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md), [release notes](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.md).
+This guide uses `dsh-a2a-server@0.4.0`, compatible with DSH `>=0.2.1-rc.2 <0.3.0`. Treat version compatibility errors as installation failures. Plugin documentation: [English](https://github.com/huangjuhua-aigc/dsh-a2a), [简体中文](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md), [release notes](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.md).
 
 ### 2. Build and launch Portal
 
@@ -46,7 +50,7 @@ The current UI uses Chinese labels:
 | 环境检测 — Environment | Check that Node and dsh are available |
 | 名片 — Agent Card | Use `my-agent` for this example; describe the data visitors may request |
 | 模型 — Model | Select a provider and model, then enter or reuse its API key |
-| 网络 — Network | Initially choose 自定义地址 (Custom address), enter `127.0.0.1`, and use port `3080` |
+| 网络 — Network | For local testing choose 局域网 (LAN) and enter `127.0.0.1:3080`; for remote access choose 公网中继 (Public relay), following the [relay guide](docs/relay.en.md) |
 | 访客 — Visitors | Give each visitor a separate token and allow conversation and workspace reading |
 | 工作区 — Workspace | Select the local directory whose contents may be shared with these visitors |
 | 保存启动 — Save and start | Save first, install the plugin below, then start the agent |
@@ -61,7 +65,7 @@ Open another terminal. Run the first command **only if the profile does not exis
 
 ```sh
 dsh --profile a2a-my-agent --from-default-profile web --dump-config
-dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.3.0
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.0
 ```
 
 `--dump-config` initializes the Web profile without starting a listener. Resolve any installation error before continuing. In Portal, click 启动 (Start), then 进入控制台 (Open console).
@@ -75,6 +79,8 @@ curl http://127.0.0.1:3080/.well-known/agent-card.json
 A readable card confirms the discovery route. The visitor check below also verifies authentication and the model.
 
 ## Access from another network with Tailscale
+
+> Legacy configuration reference: the current wizard offers Public relay and LAN only. It no longer includes the custom direct-address or separate port controls mentioned in older instructions. Existing direct-address configurations remain supported. For a new remote connection, follow the [public relay guide](docs/relay.en.md).
 
 Use **Tailscale Serve + HTTPS** to expose only the two A2A paths. It does not require a public IP, purchased domain or router port forwarding. Access is limited to authorized Tailscale devices. Funnel is a separate public publishing feature and is not enabled by these instructions. [Official Serve documentation](https://tailscale.com/docs/features/tailscale-serve)
 
@@ -101,7 +107,7 @@ If 443 is already used by another Serve/Funnel configuration, select an unused p
 
 Preserve the `/a2a` and `/.well-known/agent-card.json` suffixes on the backend URLs: Serve removes the mounted prefix and the target path restores it. Do not forward the entire DSH Web listener or the Portal's port 17890. [Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve)
 
-Copy the actual HTTPS hostname from `status`, for example `https://my-pc.example-tailnet.ts.net`. In Portal → 编辑配置 (Edit configuration) → 网络 (Network), choose 自定义地址 (Custom address) and enter that full URL. Keep the local port at 3080. Save, stop and start the agent. The Portal appends `/a2a` and keeps a full HTTPS hostname's backend on loopback; if you previously set `network.bindHost` manually, check it is also loopback.
+Check that the actual HTTPS hostname from `status`, for example `https://my-pc.example-tailnet.ts.net`, matches your previously saved direct-address configuration. Keep the local listener at `127.0.0.1:3080`. The current Portal no longer offers a custom direct-address editor; use [public relay](docs/relay.en.md) for new remote connections. Existing direct-address configurations remain readable; if you previously set `network.bindHost` manually, check it is also loopback.
 
 The tailnet policy must allow the visitor to reach the host's TCP 443, or the HTTPS port you chose. Amend the intended destination and port in the existing policy rather than replacing the policy with unrestricted access.
 
@@ -186,7 +192,7 @@ Stop the agent in Portal, then close the old Portal process. From the `Talk2MyAg
 git pull --ff-only
 pnpm install
 pnpm --filter @talk2myagent/a2a-host run build:web
-dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.3.0
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.0
 pnpm --filter @talk2myagent/a2a-host start
 ```
 

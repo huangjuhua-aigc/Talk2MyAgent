@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures.ts'
 
-const cards = ['Agent 概览', '公网中继', '公开简报', '来访记录']
+const cards = ['Agent 概览', '公网中继', '邀请访客聊天', '公开简报', '来访记录']
 
 test('Cards fold independently, retain status, and remember preferences per agent after reload', async ({ page }, testInfo) => {
   for (const name of cards) {

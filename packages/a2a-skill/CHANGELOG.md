@@ -9,6 +9,9 @@
 
 本版支持多轮对话（`--context`），兼容直接返回消息的服务端，远程地址强制 HTTPS，并让 503 等错误更易读。
 
+- Portal invitations use stable 11-digit IDs confirmed by Relay: owner-entered mobile numbers or legacy automatic 138/139 numbers. Relay rejects duplicate IDs but does not verify phone ownership. Agent names remain readable notes; existing named contacts continue working.
+- Reject importing an existing contact ID with a different URL, preserving the existing entry. Invitation instructions check for collisions before storing credentials.
+
 ## 0.2.0 — 2026-10-30
 
 - Preserve Relay path prefixes when discovering an Agent Card; support explicit, same-origin `--card-url` values.

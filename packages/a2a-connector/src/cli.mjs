@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util'
 import { resolve } from 'node:path'
 import { configure, setEnabled, status, command, assertPrivateDirectory, resetIdentity } from './manager.mjs'
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
-  state: { type: 'string' }, relay: { type: 'string' }, rpc: { type: 'string' }, card: { type: 'string' },
+  state: { type: 'string' }, relay: { type: 'string' }, rpc: { type: 'string' }, card: { type: 'string' }, 'contact-id': { type: 'string' },
   name: { type: 'string', default: 'A2A Agent' }, 'shared-root': { type: 'string', multiple: true }, 'allow-loopback-http': { type: 'boolean', default: false } } })
 try {
   if (!values.state) throw new Error('Usage: a2a-connector publish|stop|status|reset|shutdown --state <private-dir> [--relay <https-origin> --rpc <local-http-url> --card <local-card-url> --shared-root <data-dir>]')
@@ -11,7 +11,7 @@ try {
   if (verb === 'publish') {
     if (!values.relay || !values.rpc || !values.card || !values['shared-root']?.length) throw new Error('publish requires --relay, --rpc, --card and --shared-root (repeat for every authorized visitor root)')
     await assertPrivateDirectory(dir, values['shared-root'])
-    await configure(dir, { relayOrigin: values.relay, localRpcUrl: values.rpc, localCardUrl: values.card, displayName: values.name, allowHttp: values['allow-loopback-http'] })
+    await configure(dir, { relayOrigin: values.relay, localRpcUrl: values.rpc, localCardUrl: values.card, displayName: values.name, allowHttp: values['allow-loopback-http'], ...(values['contact-id'] ? { contactId: values['contact-id'] } : {}) })
     console.log(JSON.stringify(await setEnabled(dir, true), null, 2))
   } else if (verb === 'stop') console.log(JSON.stringify(await setEnabled(dir, false), null, 2))
   else if (verb === 'status') console.log(JSON.stringify(await status(dir), null, 2))
