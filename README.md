@@ -4,6 +4,8 @@
 
 Portal 使用已发布的 `dsh-a2a-server 0.4.0`：自动准备 Microsandbox，每位访客独立沙箱，公共资料只读、私有文件持久保存，空闲 30 秒暂停、10 分钟停止。无需手动安装 Docker；系统虚拟化未开启时会提示操作。源码测试可以设置 `A2A_PLUGIN_SOURCE`，正常使用无需设置。详见[本地开发版安装](docs/relay.md#本地开发版安装)和[沙箱指南](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.md)。
 
+宿主机无法运行嵌套虚拟化（如部分云主机、容器）时，可在启动 Portal 前设置 `A2A_VISITOR_EXECUTION=read-only` 跳过 Microsandbox。**安全代价**：访客工具不再运行在独立虚拟机里，唯一的边界就是共享目录的只读范围，因此只把确认可以公开的资料放进共享目录。默认值为 `microsandbox`，其他取值会报错。
+
 Portal 与调用技能当前版本为 **0.2.0**。已加入[公网中继](docs/relay.md)：Portal 默认使用 **https://relay.creez.cn**，可自动注册、后台连接并复制访客聊天邀请，无需自行部署中继。也支持自建 [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server)，在 Portal 选择自定义 host；维护者可通过 `A2A_RELAY_DEFAULT_HOST` 覆盖默认入口。
 
 Portal 支持先保存 Agent、获取固定中继地址和准备邀请，再启动自动上线。独立的“邀请访客聊天”区域可通过加号添加姓名和 Token；主页五个区块均可折叠并按 Agent 记忆状态，启动前检查端口占用。调用技能支持完整中继名片地址，并修复了 `GetTask` 任务查询解析；[技能更新记录](packages/a2a-skill/CHANGELOG.md)。

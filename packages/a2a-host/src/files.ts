@@ -30,7 +30,8 @@ import {
   statePath,
 } from './paths.ts'
 
-/** One saved agent as it lives on disk. */
+/** One saved agent as it lives on disk. */import { visitorExecution } from './visitor-runtime.ts'
+
 export interface AgentRecord {
   id: string
   /** The dsh profile this agent launches under. */
@@ -101,7 +102,8 @@ function patchRows(config: WizardConfig, adminRef: string, agentId: string): Rec
           workspaceRoot: config.isolation.workspaceRoot,
           peerWorkspaces: config.isolation.peerWorkspaces,
           privateRoot: agentWorkspacesPath(agentId),
-          execution: 'microsandbox',
+          // Hosts without working nested KVM can opt into the in-process scoped reader.
+          execution: visitorExecution(),
         },
         // The opening briefing is always on — it is the product's premise,
         // not a deployment decision.

@@ -29,7 +29,7 @@ import { fetchSnapshot } from './monitor.ts'
 import { automaticBriefingEnabled, setAutomaticBriefing } from './briefing.ts'
 import { resolveBindHost } from './url.ts'
 import { prepareAgentWorkspaces } from './isolation.ts'
-import { requireVisitorRuntime, visitorPluginSource } from './visitor-runtime.ts'
+import { prepareVisitorRuntime, visitorPluginSource } from './visitor-runtime.ts'
 import { assertPortAvailable } from './ports.ts'
 import { waitForAgentReady } from './readiness.ts'
 import { stopAgent } from './stop-agent.ts'
@@ -293,7 +293,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     const bind = { host: bindHost, port: record.config.network.port }
     if (!runner.running) await assertPortAvailable(bind)
     if (!runner.running) {
-      await requireVisitorRuntime(record.profile, { onProgress: progress => preparations.set(id, progress) })
+      await prepareVisitorRuntime(record.profile, { onProgress: progress => preparations.set(id, progress) })
       for (const pkg of extraPackages(record.config)) {
         const result = await installPlugin(record.profile, pkg)
         if (!result.ok) throw new Error(`模型插件安装失败：${result.output.slice(-2000)}`)

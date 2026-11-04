@@ -4,6 +4,8 @@
 
 Portal uses the published `dsh-a2a-server 0.4.0` with automatically prepared Microsandbox: one VM per visitor, read-only public data and persistent private files. Idle VMs pause after 30 seconds and stop after 10 minutes. Docker is not required; unavailable system virtualization produces an actionable message. Set `A2A_PLUGIN_SOURCE` only for local development. See [local development installation](docs/relay.en.md#local-development-installation) and the [sandbox guide](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.en.md).
 
+On hosts without nested virtualization (some cloud VMs or containers), set `A2A_VISITOR_EXECUTION=read-only` before starting the Portal to skip Microsandbox. **Security trade-off**: visitor tools no longer run in a per-visitor VM; the read-only shared-folder scope becomes the only boundary, so put only material you are willing to publish there. The default is `microsandbox`; any other value is rejected.
+
 Portal and the calling skill are now **0.2.0**. [Public relay](docs/relay.en.md) defaults to **https://relay.creez.cn**: Portal registers and connects automatically, then generates visitor chat invitations without requiring you to deploy a relay. You can also self-host [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server) and select a custom host in Portal. Operators can override the default with `A2A_RELAY_DEFAULT_HOST`.
 
 You can save an Agent, reserve its stable Relay URL and prepare invitations before starting it; startup then connects automatically at that URL. The separate visitor invitation card includes a plus button for adding a visitor's name and token. All five dashboard cards can collapse. New visitors added while running take effect after restarting the Agent.

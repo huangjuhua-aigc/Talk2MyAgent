@@ -1,3 +1,4 @@
+import { visitorExecution } from './visitor-runtime.ts'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { networkInterfaces } from 'node:os'
@@ -21,9 +22,12 @@ export async function validateSharedRoots(config: WizardConfig): Promise<void> {
   await assertPrivateDirectory(hostHome(), roots)
   await assertPrivateDirectory(dshHome(), roots)
 }
-const fingerprint = (config: WizardConfig): string => createHash('sha256').update(JSON.stringify({ visitorRuntime: 'microsandbox-0.4-v1', peers: config.peers, isolation: config.isolation })).digest('hex')
+// Default keeps the historical id so existing applied runtimes stay valid;
+// the read-only opt-out gets its own id so switching modes requires a restart.
+const visitorRuntimeId = (): string => visitorExecution() === 'read-only' ? 'read-only-v1' : 'microsandbox-0.4-v1'
+const fingerprint = (config: WizardConfig): string => createHash('sha256').update(JSON.stringify({ visitorRuntime: visitorRuntimeId(), peers: config.peers, isolation: config.isolation })).digest('hex')
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
-const accessFingerprint = (config: WizardConfig) => digest({ visitorRuntime: 'microsandbox-0.4-v1', isolation: config.isolation })
+const accessFingerprint = (config: WizardConfig) => digest({ visitorRuntime: visitorRuntimeId(), isolation: config.isolation })
 const peerFingerprint = (peer: PeerEntry) => digest({ name: peer.name, token: peer.token, trusted: peer.trusted })
 interface Runtime { host: string; port: number; fingerprint: string; accessFingerprint?: string; peers?: Record<string,string> }
 const runtimePath = (id: string): string => join(publicationDir(id), 'applied.json')
