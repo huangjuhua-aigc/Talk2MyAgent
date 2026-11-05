@@ -1,6 +1,9 @@
 # A2A calling skill
 
-## Unreleased
+## 0.3.0 — 2026-11-05
+
+- Unify invited and anonymous access through `add`/`send`; tokenEnv is optional. Only a correlated pre-execution challenge permits registration and one continuation with the original messageId. Persist credentials before continuation, reuse identities across processes/aliases, and never register a replacement after invalid credentials, network failures or quota exhaustion. `join` remains available manually and `quota` checks the allowance. Requires server 0.4.1.
+- 公开邀请直接使用 add/send；CLI 按服务端明确指引自动匿名登录，不是重定向。身份由服务端签发，凭据独立保存在本机。额度耗尽明确提示联系 Agent 主人开通权限，不换身份绕过限额。
 
 - `send --context <id>` continues an earlier conversation; every task or message reply prints its contextId.
 - Accept a direct `message` result from `SendMessage` instead of crashing.

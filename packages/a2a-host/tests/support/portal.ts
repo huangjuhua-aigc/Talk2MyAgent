@@ -14,9 +14,11 @@ export interface FixtureAgent {
   briefing: string
   taskState: string
   taskCalls: number
+  liveVisitorCalls: number
+  liveVisitorMode: 'supported' | 'unsupported' | 'unconfirmed'
 }
 
-export async function startPortal(agentCount = 2, options: { relayOrigin?: string; publicA2A?: boolean; port?: number } = {}) {
+export async function startPortal(agentCount = 2, options: { relayOrigin?: string; publicA2A?: boolean; liveVisitors?: boolean; port?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'a2a-ui-'))
   const host = join(root, 'console')
   const agents: FixtureAgent[] = []
@@ -51,6 +53,15 @@ export async function startPortal(agentCount = 2, options: { relayOrigin?: strin
             isolation: { workspaceRoot: workspace, peerWorkspaces: {} }, network: { mode: 'custom', port: 9935 + i, host: '127.0.0.1' },
           } },
         briefing: join(workspace, '.hop', 'handoff.md'), taskState: 'TASK_STATE_COMPLETED', taskCalls: 0,
+        liveVisitorCalls: 0, liveVisitorMode: 'supported',
+      }
+      if (options.liveVisitors) {
+        const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+        await mkdir(join(host, 'relay', id), { recursive: true })
+        await writeFile(join(host, 'relay', id, 'applied.json'), JSON.stringify({ host: '127.0.0.1', port: agent.record.config.network.port,
+          fingerprint: digest({ visitorRuntime: 'microsandbox-0.4-v1', peers: agent.record.config.peers, isolation: agent.record.config.isolation }),
+          accessFingerprint: digest({ visitorRuntime: 'microsandbox-0.4-v1', isolation: agent.record.config.isolation }),
+          peers: Object.fromEntries(agent.record.config.peers.map(peer => [peer.name, digest({ name: peer.name, token: peer.token, trusted: peer.trusted })])) }))
       }
       agents.push(agent)
       if (options.publicA2A) {
@@ -82,6 +93,13 @@ export async function startPortal(agentCount = 2, options: { relayOrigin?: strin
           res.setHeader('content-type', 'application/json')
           if (req.headers.authorization !== `Bearer ${agent.record.config.adminToken}`) {
             res.writeHead(401); res.end('{}'); return
+          }
+          if (req.url === '/a2a/admin/visitors') {
+            agent.liveVisitorCalls++
+            if (!options.liveVisitors || agent.liveVisitorMode === 'unsupported') { res.writeHead(404); res.end('{}'); return }
+            let text = ''; for await (const chunk of req) text += chunk
+            const visitor = JSON.parse(text) as { name: string }
+            res.end(JSON.stringify({ name: visitor.name, applied: agent.liveVisitorMode === 'supported' })); return
           }
           if (req.method === 'GET') {
             res.end(JSON.stringify({ generatedAt: new Date().toISOString(), contexts: [{ contextId: `${id}-context`, peer: 'alice',
@@ -127,7 +145,7 @@ export async function startPortal(agentCount = 2, options: { relayOrigin?: strin
     })
     // Public A2A fixture is already listening; expose a running indicator for publication UI.
     // These tests never use the Agent stop control on this shared fixture process.
-    if (options.publicA2A) for (const agent of agents) await writeFile(join(host, 'agents', `${agent.record.id}.pid`), String(processUnderTest.pid))
+    if (options.publicA2A || options.liveVisitors) for (const agent of agents) await writeFile(join(host, 'agents', `${agent.record.id}.pid`), String(processUnderTest.pid))
     return { root, host, agents, baseURL: `http://127.0.0.1:${port}`, close,
       readRecord: async (id: string): Promise<AgentRecord> => JSON.parse(await readFile(join(host, 'agents', `${id}.json`), 'utf8')) as AgentRecord }
   } catch (error) { await close(); throw error }

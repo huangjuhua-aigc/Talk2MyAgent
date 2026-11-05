@@ -1,12 +1,14 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { networkInterfaces } from 'node:os'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { assertPrivateDirectory, configure, register, resetIdentity, setEnabled, status, type PublicationStatus } from '@talk2myagent/a2a-connector'
-import { hostHome, dshHome } from './paths.ts'
+import { hostHome, dshHome, agentManagementPath } from './paths.ts'
+import { managementRequest } from './monitor.ts'
 import { listAgents, type AgentRecord } from './files.ts'
 import { resolveBindHost } from './url.ts'
-import { visitorInstruction } from './invitation.ts'
+import { visitorInstruction, publicVisitorInstruction } from './invitation.ts'
+import { publicVisitorsEnabled } from './public-visitors.ts'
 import type { PeerEntry, WizardConfig } from './types.ts'
 import { derivedPublicUrl } from './url.ts'
 import { isContactId } from './contact-id.ts'
@@ -50,6 +52,26 @@ export async function appliedVisitors(record: AgentRecord): Promise<string[]> {
   }
   return active.fingerprint === fingerprint(record.config) ? record.config.peers.map(p => p.name) : []
 }
+/** A saved addition becomes applied only after the running Agent acknowledges it over local IPC. */
+export async function applyVisitorLive(record: AgentRecord, peer: PeerEntry): Promise<boolean> {
+  const active = await runtime(record)
+  if (!active?.peers || active.accessFingerprint !== accessFingerprint(record.config)) return false
+  // An additive acknowledgement must never bless unrelated, unapplied revocations or token changes.
+  const existing = record.config.peers.filter(p => p.name !== peer.name)
+  if (Object.keys(active.peers).length !== existing.length || existing.some(p => active.peers![p.name] !== peerFingerprint(p))) return false
+  try {
+    const response = await managementRequest(agentManagementPath(record.id), record.config.adminToken, '/a2a/admin/visitors',
+      { name: peer.name, token: peer.token, trusted: peer.trusted })
+    const result = response.json as { name?: unknown; applied?: unknown }
+    if (!response.ok || result.name !== peer.name || result.applied !== true) return false
+    const peers = { ...active.peers, [peer.name]: peerFingerprint(peer) }
+    const fingerprintValue = record.config.peers.every(p => peers[p.name] === peerFingerprint(p)) ? fingerprint(record.config) : active.fingerprint
+    const file = runtimePath(record.id), temporary = `${file}.${randomUUID()}.tmp`
+    try { await writeFile(temporary, JSON.stringify({ ...active, peers, fingerprint: fingerprintValue }), { mode: 0o600 }); await rename(temporary, file) }
+    finally { await rm(temporary, { force: true }) }
+    return true
+  } catch { return false } // Keep the persisted visitor; never retry an uncertain admission automatically.
+}
 export async function stopPublication(id: string): Promise<void> {
   const s = await publicationStatus(id)
   if (s.state !== 'unregistered') await setEnabled(publicationDir(id), false)
@@ -92,9 +114,11 @@ export async function requestPublication(record: AgentRecord, running: boolean):
   return running && active?.fingerprint === fingerprint(record.config) ? await publish(record) : await reservePublication(record)
 }
 export async function invitation(record: AgentRecord, peerName: string, running = false): Promise<{ text: string; notice: string; online: boolean }> {
+  const publicAccess = peerName === '__public__'
+  if (publicAccess && !await publicVisitorsEnabled(record.id)) throw new Error('请先开启允许公开访客')
   const peer = record.config.peers.find(p => p.name === peerName && p.trusted)
-  if (!peer) throw new Error('请选择已允许聊天的访客')
-  const applied = (await appliedVisitors(record)).includes(peer.name)
+  if (!peer && !publicAccess) throw new Error('请选择已允许聊天的访客')
+  const applied = publicAccess || (await appliedVisitors(record)).includes(peer!.name)
   let publication: { publicRpcUrl: string; publicCardUrl: string; contactId: string } | undefined
   let online = running && applied
   if (record.config.network.mode === 'relay') {
@@ -108,6 +132,6 @@ export async function invitation(record: AgentRecord, peerName: string, running 
   } else if (!derivedPublicUrl(record.config.network)) throw new Error('请先配置可供访客访问的局域网地址')
   const notice = online ? '' : running && !applied ? '此访客配置尚未应用，请重启 Agent 后再聊天。地址和邀请可提前保存。'
     : 'Agent 当前未连接。请在主人启动 Agent 并开启发布后再聊天；访问地址保持不变。'
-  const text = visitorInstruction(record.config, peer, undefined, publication)
+  const text = publicAccess ? publicVisitorInstruction(record.config, publication) : visitorInstruction(record.config, peer!, undefined, publication)
   return { text: notice ? `${notice}\n\n${text.replace('A2A 在线 agent', 'A2A agent')}` : text, notice, online }
 }

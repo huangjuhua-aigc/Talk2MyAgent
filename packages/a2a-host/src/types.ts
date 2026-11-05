@@ -121,6 +121,7 @@ export interface MonitorContext {
 }
 
 export interface MonitorSnapshot {
+  publicVisitors?: { enabled: boolean; turnLimit: number; managed: boolean }
   generatedAt: string
   contexts: MonitorContext[]
 }

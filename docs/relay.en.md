@@ -1,6 +1,6 @@
 # Public relay
 
-The independent open-source service is [a2a-relay-server](https://github.com/huangjuhua-aigc/a2a-relay-server). Portal and the calling skill use version 0.2.0. This branch's Microsandbox and safe-stop features require the matching DSH protocol plugin 0.4.0.
+The independent open-source service is [a2a-relay-server](https://github.com/huangjuhua-aigc/a2a-relay-server). Portal and the calling skill use version 0.3.0. This branch's Microsandbox and safe-stop features require the matching DSH protocol plugin 0.4.1.
 
 Put a Relay port in its service URL, for example `http://127.0.0.1:8787` for local testing or `https://relay.example.com:8443` for a custom HTTPS listener. The wizard offers Public relay and LAN, with no separate advanced port or custom direct-address form. Enter a LAN address as `192.168.1.10:3080`. Relay mode retains the local listener configuration, whose default port is `3080`. Portal checks for occupied ports before launch. A healthy Relay is not proof that an Agent is online, and loopback URLs cannot be used from another device.
 
@@ -40,7 +40,7 @@ Set `A2A_RELAY_SOURCE` to an installed independent Relay checkout, then run Conn
 
 ## Local development installation
 
-Plugin `0.4.0` is available on npm; normal startup does not need a development override. DSH `0.2.1-rc.2` meets the compatibility requirement. Use the following steps only to test local unpublished changes.
+Plugin `0.4.1` is available on npm; normal startup does not need a development override. DSH `0.2.1-rc.2` meets the compatibility requirement. Use the following steps only to test local unpublished changes.
 
 Build and pack in the dsh-a2a checkout, then set the package source before starting Portal (POSIX shell example):
 
@@ -49,7 +49,7 @@ cd /path/to/dsh-a2a
 pnpm build
 mkdir -p "$HOME/.a2a/packages"
 npm pack --pack-destination "$HOME/.a2a/packages"
-export A2A_PLUGIN_SOURCE="$HOME/.a2a/packages/dsh-a2a-server-0.4.0.tgz"
+export A2A_PLUGIN_SOURCE="$HOME/.a2a/packages/dsh-a2a-server-0.4.1.tgz"
 pnpm --dir /path/to/Talk2MyAgent/packages/a2a-host start
 ```
 

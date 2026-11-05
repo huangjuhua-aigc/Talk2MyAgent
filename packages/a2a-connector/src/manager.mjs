@@ -4,6 +4,7 @@ import { join, resolve, dirname, relative, isAbsolute, sep } from 'node:path'
 import { request } from 'node:http'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { preferContactAddress } from './public-address.mjs'
 
 export const pipePath = dir => process.platform === 'win32' ? `\\\\.\\pipe\\a2a-connector-${createHash('sha256').update(resolve(dir).toLowerCase()).digest('hex').slice(0,32)}` : join(resolve(dir), 'control.sock')
 async function canonical(path) {
@@ -33,7 +34,7 @@ export async function command(dir, action, data = {}) {
       headers: { authorization: `Bearer ${secret.token}`, 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } }, res => {
       let text = ''; res.setEncoding('utf8'); res.on('data', c => { text += c; if (text.length > 65536) res.destroy(new Error('IPC response too large')) })
       res.on('error', reject); res.on('end', () => {
-        try { const result = JSON.parse(text); if (res.statusCode !== 200) throw new Error(result.error); resolve(result) } catch (e) { reject(e) }
+        try { const result = JSON.parse(text); if (res.statusCode !== 200) throw new Error(result.error); resolve(preferContactAddress(result)) } catch (e) { reject(e) }
       })
     })
     req.on('error', reject); req.on('timeout', () => req.destroy(new Error('Connector IPC timeout'))); req.end(body)
@@ -57,8 +58,8 @@ export async function register(dir) { await ensureDaemon(dir); return await comm
 export async function status(dir) {
   try { return await command(dir, 'status') } catch (e) {
     if (!['ENOENT','ECONNREFUSED'].includes(e.code)) throw e
-    try { const s = JSON.parse(await readFile(join(dir, 'state.json'), 'utf8')); return { ...s.registrations?.[s.config?.relayOrigin]?.info, state: 'stopped', desiredEnabled: s.desiredEnabled,
-      cloudSyncPending: s.cloudSyncPending, relayOrigin: s.config?.relayOrigin, error: s.desiredEnabled ? 'Connector 未运行，开启发布可恢复' : undefined } } catch (e) { if (e.code !== 'ENOENT') throw e }
+    try { const s = JSON.parse(await readFile(join(dir, 'state.json'), 'utf8')); return preferContactAddress({ ...s.registrations?.[s.config?.relayOrigin]?.info, state: 'stopped', desiredEnabled: s.desiredEnabled,
+      cloudSyncPending: s.cloudSyncPending, relayOrigin: s.config?.relayOrigin, error: s.desiredEnabled ? 'Connector 未运行，开启发布可恢复' : undefined }) } catch (e) { if (e.code !== 'ENOENT') throw e }
     return { state: 'unregistered', desiredEnabled: false, cloudSyncPending: false }
   }
 }

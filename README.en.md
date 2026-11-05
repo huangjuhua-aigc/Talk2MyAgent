@@ -2,11 +2,13 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-Portal uses the published `dsh-a2a-server 0.4.0` with automatically prepared Microsandbox: one VM per visitor, read-only public data and persistent private files. Idle VMs pause after 30 seconds and stop after 10 minutes. Docker is not required; unavailable system virtualization produces an actionable message. Set `A2A_PLUGIN_SOURCE` only for local development. See [local development installation](docs/relay.en.md#local-development-installation) and the [sandbox guide](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.en.md).
+Portal provides an off-by-default public visitor switch with five accepted messages per identity. Invited and public visitors share the add/send flow. Only an explicit pre-execution authentication challenge lets the skill register, save its credential and continue the original message once. Exhausted visitors are told to contact the Agent owner for access. This requires plugin 0.4.1. With public admission disabled, only invited visitors have access. See the [client communication and credential contract](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/public-visitors.en.md).
 
-Portal and the calling skill are now **0.2.0**. [Public relay](docs/relay.en.md) defaults to **https://relay.creez.cn**: Portal registers and connects automatically, then generates visitor chat invitations without requiring you to deploy a relay. You can also self-host [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server) and select a custom host in Portal. Operators can override the default with `A2A_RELAY_DEFAULT_HOST`.
+Portal uses the published `dsh-a2a-server 0.4.1` with automatically prepared Microsandbox: one VM per visitor, read-only public data and persistent private files. Idle VMs pause after 30 seconds and stop after 10 minutes. Docker is not required; unavailable system virtualization produces an actionable message. Set `A2A_PLUGIN_SOURCE` only for local development. See [local development installation](docs/relay.en.md#local-development-installation) and the [sandbox guide](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.en.md).
 
-You can save an Agent, reserve its stable Relay URL and prepare invitations before starting it; startup then connects automatically at that URL. The separate visitor invitation card includes a plus button for adding a visitor's name and token. All five dashboard cards can collapse. New visitors added while running take effect after restarting the Agent.
+Portal and the calling skill are now **0.3.0**. [Public relay](docs/relay.en.md) defaults to **https://relay.creez.cn**: Portal registers and connects automatically, then generates visitor chat invitations without requiring you to deploy a relay. You can also self-host [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server) and select a custom host in Portal. Operators can override the default with `A2A_RELAY_DEFAULT_HOST`.
+
+You can save an Agent, reserve its stable Relay URL and prepare invitations before starting it; startup then connects automatically at that URL. The separate visitor invitation card includes a plus button for adding a visitor's name and token. All five dashboard cards can collapse. New visitors added while running take effect immediately after local acknowledgement, without interrupting existing tasks. Upgrade and restart an older plugin once to enable this capability.
 
 This version adds collapsible dashboard cards with per-agent preferences, wider Relay address inputs and a port-availability check before startup. The calling skill supports complete Relay Card URLs and fixes `GetTask` response parsing; see its [changelog](packages/a2a-skill/CHANGELOG.md).
 
@@ -27,7 +29,7 @@ pnpm --version
 dsh --version
 ```
 
-This guide uses `dsh-a2a-server@0.4.0`, compatible with DSH `>=0.2.1-rc.2 <0.3.0`. Treat version compatibility errors as installation failures. Plugin documentation: [English](https://github.com/huangjuhua-aigc/dsh-a2a), [简体中文](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md), [release notes](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.md).
+This guide uses `dsh-a2a-server@0.4.1`, compatible with DSH `>=0.2.1-rc.2 <0.3.0`. Treat version compatibility errors as installation failures. Plugin documentation: [English](https://github.com/huangjuhua-aigc/dsh-a2a), [简体中文](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md), [release notes](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.md).
 
 ### 2. Build and launch Portal
 
@@ -65,7 +67,7 @@ Open another terminal. Run the first command **only if the profile does not exis
 
 ```sh
 dsh --profile a2a-my-agent --from-default-profile web --dump-config
-dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.0
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.1
 ```
 
 `--dump-config` initializes the Web profile without starting a listener. Resolve any installation error before continuing. In Portal, click 启动 (Start), then 进入控制台 (Open console).
@@ -192,7 +194,7 @@ Stop the agent in Portal, then close the old Portal process. From the `Talk2MyAg
 git pull --ff-only
 pnpm install
 pnpm --filter @talk2myagent/a2a-host run build:web
-dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.0
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.1
 pnpm --filter @talk2myagent/a2a-host start
 ```
 

@@ -2,11 +2,13 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-Portal 使用已发布的 `dsh-a2a-server 0.4.0`：自动准备 Microsandbox，每位访客独立沙箱，公共资料只读、私有文件持久保存，空闲 30 秒暂停、10 分钟停止。无需手动安装 Docker；系统虚拟化未开启时会提示操作。源码测试可以设置 `A2A_PLUGIN_SOURCE`，正常使用无需设置。详见[本地开发版安装](docs/relay.md#本地开发版安装)和[沙箱指南](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.md)。
+Portal 支持默认关闭的「允许公开访客」开关，每个公开身份累计 5 次消息。公开与受邀访问统一使用 add/send；首次缺少 Token 时，技能按服务端明确的“消息未执行、需要匿名登录”指引登记、保存凭据并继续原消息，额度用完提示联系主人开通权限。需要插件 0.4.1；未开启时仍只允许受邀访客。详见[客户端通信与凭据约定](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/public-visitors.md)。
 
-Portal 与调用技能当前版本为 **0.2.0**。已加入[公网中继](docs/relay.md)：Portal 默认使用 **https://relay.creez.cn**，可自动注册、后台连接并复制访客聊天邀请，无需自行部署中继。也支持自建 [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server)，在 Portal 选择自定义 host；维护者可通过 `A2A_RELAY_DEFAULT_HOST` 覆盖默认入口。
+Portal 使用已发布的 `dsh-a2a-server 0.4.1`：自动准备 Microsandbox，每位访客独立沙箱，公共资料只读、私有文件持久保存，空闲 30 秒暂停、10 分钟停止。无需手动安装 Docker；系统虚拟化未开启时会提示操作。源码测试可以设置 `A2A_PLUGIN_SOURCE`，正常使用无需设置。详见[本地开发版安装](docs/relay.md#本地开发版安装)和[沙箱指南](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.md)。
 
-Portal 支持先保存 Agent、获取固定中继地址和准备邀请，再启动自动上线。独立的“邀请访客聊天”区域可通过加号添加姓名和 Token；主页五个区块均可折叠并按 Agent 记忆状态，启动前检查端口占用。调用技能支持完整中继名片地址，并修复了 `GetTask` 任务查询解析；[技能更新记录](packages/a2a-skill/CHANGELOG.md)。
+Portal 与调用技能当前版本为 **0.3.0**。已加入[公网中继](docs/relay.md)：Portal 默认使用 **https://relay.creez.cn**，可自动注册、后台连接并复制访客聊天邀请，无需自行部署中继。也支持自建 [A2A Relay Server](https://github.com/huangjuhua-aigc/a2a-relay-server)，在 Portal 选择自定义 host；维护者可通过 `A2A_RELAY_DEFAULT_HOST` 覆盖默认入口。
+
+Portal 支持先保存 Agent、获取固定中继地址和准备邀请，再启动自动上线。独立的“邀请访客聊天”区域可通过加号添加姓名和 Token，新版插件确认后立即生效，不中断已有任务；旧插件升级后需重启一次。主页五个区块均可折叠并按 Agent 记忆状态，启动前检查端口占用。调用技能支持完整中继名片地址，并修复了 `GetTask` 任务查询解析；[技能更新记录](packages/a2a-skill/CHANGELOG.md)。
 
 把本地资料开放给获准的 A2A 访客。你的在线 agent 可以聊天、读取你指定工作目录中的文本，并根据本地项目记忆自动更新公开简报；你在本机 Portal 配置模型、访客和资料目录，查看来访记录。
 
@@ -46,7 +48,7 @@ pnpm --filter @talk2myagent/a2a-host start
 
 浏览器会打开本机 Portal：[http://127.0.0.1:17890](http://127.0.0.1:17890)。这个地址只用于主人管理，不发给访客。
 
-本指南使用 `dsh-a2a-server@0.4.0`，包含指定目录读取、私有主人入口和自动简报开关。完成下一步的插件安装后再启动 agent。插件的[中文说明](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md)、[英文说明](https://github.com/huangjuhua-aigc/dsh-a2a)和[更新日志](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.zh-CN.md)可单独查阅。
+本指南使用 `dsh-a2a-server@0.4.1`，包含指定目录读取、私有主人入口和自动简报开关。完成下一步的插件安装后再启动 agent。插件的[中文说明](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md)、[英文说明](https://github.com/huangjuhua-aigc/dsh-a2a)和[更新日志](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.zh-CN.md)可单独查阅。
 
 ### 3. 在向导里保存配置
 
@@ -70,7 +72,7 @@ pnpm --filter @talk2myagent/a2a-host start
 
 ```sh
 dsh --profile a2a-my-agent --from-default-profile web --dump-config
-dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.0
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.1
 ```
 
 `--dump-config` 在这里用于初始化 Web profile 并输出配置，不启动监听服务。安装失败时先按提示修复，不继续启动。然后回 Portal 点「启动」→「进入控制台」。已有部署升级时，先停止 agent，更新原有 profile 的插件，再从 Portal 启动；详见[升级步骤](docs/guide.md#升级)。

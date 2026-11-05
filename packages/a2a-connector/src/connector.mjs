@@ -4,6 +4,7 @@ import { networkInterfaces } from 'node:os'
 import { isIP } from 'node:net'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import WebSocket from 'ws'
+import { preferContactAddress } from './public-address.mjs'
 import { LIMIT, originOf, decodeFrame, bytesOf, headersOf, wire, sameSession, readLimited, adaptCard } from '@talk2myagent/a2a-relay-protocol'
 const isContactId = value => typeof value === 'string' && /^1[3-9]\d{9}$/.test(value)
 const contactMessages = { CONTACT_ID_TAKEN: '该手机号编号已被占用，请填写其他号码。', CONTACT_ID_IMMUTABLE: '该 Agent 的公网编号已固定，不能更改。' }
@@ -94,10 +95,12 @@ export class Connector {
         if (info.contactId !== this.config.contactId) throw new Error('Relay 返回的编号与填写的手机号不一致')
         const address = `${origin}/r/${info.contactId}`
         if (info.contactRpcUrl !== `${address}/a2a` || info.contactCardUrl !== `${address}/.well-known/agent-card.json`) throw new Error('Relay 不支持手机号地址，请先升级 Relay 服务')
-        info = { ...info, publicRpcUrl: info.contactRpcUrl, publicCardUrl: info.contactCardUrl }
       }
-      registration.info = info; await this.save()
+      registration.info = preferContactAddress(info, origin); await this.save()
     }
+    // Upgrade valid cached aliases too, without re-registering or changing the device identity.
+    const preferred = preferContactAddress(registration.info, origin)
+    if (preferred !== registration.info) { registration.info = preferred; await this.save() }
     return registration
   }
   async syncIntent(replayed = false) {

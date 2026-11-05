@@ -85,7 +85,7 @@ if (command === 'ui' || command === 'wizard') {
     await refreshAgentPatch(agent)
     const started = runner.start(agent.profile, firstTime, agentPatchPath(agent.id), bind)
     try { await waitForAgentReady(bind, { isRunning: () => runner.running }) }
-    catch (error) { if (started) runner.stop(); throw error }
+    catch (error) { if (started) await runner.stop(); throw error }
     if (started) await recordRuntime(agent, bind)
     if (agent.config.network.mode === 'relay' && agent.config.network.relay?.enabled !== false) await publish(agent)
     console.log(runner.manualCommand(agent.profile, firstTime, agentPatchPath(agent.id), bind))

@@ -15,15 +15,28 @@ import { agentPidPath, dshHome, hostHome } from './paths.ts'
 import { dshCommand } from './dsh-command.ts'
 
 /** Kill one PID and its children; the tree matters on Windows. */
-function killTree(pid: number): void {
+async function killTree(pid: number): Promise<void> {
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error('Invalid Agent PID')
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/T', '/PID', String(pid), '/F'], { stdio: 'ignore' })
+    await new Promise<void>((resolve, reject) => {
+      const killer = spawn('taskkill', ['/T', '/PID', String(pid), '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10_000 })
+      killer.once('error', reject)
+      killer.once('close', code => {
+        if (code === 0 || !pidAlive(pid)) resolve()
+        else reject(new Error(`Agent 停止失败（taskkill ${code}），进程仍在运行`))
+      })
+    })
   } else {
     try {
       process.kill(pid, 'SIGTERM')
     } catch {
       // Already gone.
     }
+  }
+  const deadline = Date.now() + 10_000
+  while (pidAlive(pid)) {
+    if (Date.now() >= deadline) throw new Error('Agent 停止超时，进程仍在运行')
+    await new Promise(resolve => setTimeout(resolve, 50))
   }
 }
 
@@ -113,9 +126,10 @@ export class DshRunner {
     child.unref()
     child.on('close', (code) => {
       this.logs.push(`(dsh exited with code ${code ?? 'unknown'})`)
-      this.child = undefined
+      if (this.child === child) this.child = undefined
       try {
-        unlinkSync(this.pidFile())
+        // A delayed close from the previous process must not erase a new PID.
+        if (Number(readFileSync(this.pidFile(), 'utf8').trim()) === child.pid) unlinkSync(this.pidFile())
       } catch {
         // Nothing recorded, or already cleared.
       }
@@ -132,17 +146,22 @@ export class DshRunner {
   }
 
   /** Stop the resident process — ours, or the one adopted from the PID file. */
-  stop(): boolean {
+  async stop(): Promise<boolean> {
     const child = this.child
     if (child !== undefined && child.exitCode === null) {
-      killTree(child.pid ?? 0)
+      await killTree(child.pid ?? 0)
+      // A following start may happen before the child's close event is delivered.
+      if (this.child === child) this.child = undefined
+      try {
+        if (Number(readFileSync(this.pidFile(), 'utf8').trim()) === child.pid) unlinkSync(this.pidFile())
+      } catch { /* Already cleared by close. */ }
       return true
     }
     const pid = this.adoptedPid()
     if (pid === undefined) return false
-    killTree(pid)
+    await killTree(pid)
     try {
-      unlinkSync(this.pidFile())
+      if (Number(readFileSync(this.pidFile(), 'utf8').trim()) === pid) unlinkSync(this.pidFile())
     } catch {
       // Already cleared.
     }

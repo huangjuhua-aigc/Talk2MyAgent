@@ -29,6 +29,7 @@ pnpm --filter @talk2myagent/a2a-host exec playwright install chromium
 
 ## 测试边界
 
+- 即时添加访客：`tests/ui/live-visitors.spec.ts` 覆盖在线保存并生效、不触发停止/启动、旧插件和未确认响应不误报成功、未应用的删除不会被新增操作覆盖。`A2A_PLUGIN_SOURCE` 指向 dsh-a2a 源码后，`node --import tsx --test tests/live-visitors.integration.test.ts` 使用真实 Portal、插件和本机 IPC 验证新增时旧任务继续运行，新旧访客隔离；模型使用测试适配器。
 Microsandbox 的自动准备单元测试覆盖插件更新、阶段进度、缓存复用与失败重试。浏览器测试覆盖自动准备提示、启动中防重复点击、下载进度、WHP 缺失提示与重试。原生 VM 隔离和 30 秒/10 分钟生命周期实测在 dsh-a2a 的 `pnpm test:microsandbox` 中。
 
 可选的真实安装测试（使用临时 DSH_HOME，不改用户配置）可在本包目录执行：
@@ -82,11 +83,17 @@ node --import tsx --test tests/visitor-runtime.integration.test.ts
 
 `U19` 验证无效的局域网地址无法通过跳转步骤绕过保存校验，切换到中继后保留已配置的本地监听端口。地址测试也覆盖 IPv6 和显式 HTTP 默认端口。
 
-完整 UI 套件共 37 项；后端与 CLI 共 24 项，其中 1 项安装集成默认跳过。调用技能另有 6 项测试，包括符合协议的 `GetTask` 直接 Task 响应和 11 位 ID 冲突保护。
+当前完整 UI 套件共 44 项；Portal 后端与 CLI 共 27 项，其中 1 项安装集成默认跳过。调用技能另有 26 项测试，覆盖公开访客接入、凭据持久化、额度、错误挑战拒绝和 11 位 ID 冲突保护。
 
 `contact-id.test.ts` 验证邀请只使用 Relay 返回的编号，忽略旧本地号码，拒绝无效服务端号码；加载和保存本地 Agent 不再生成 11 位号码。中继 UI 用例校验 `add`/`card`/`send` 使用 Relay ID，并用数字 ID 完成实际技能调用。独立 Relay 的 `contact-numbers.test.mjs` 验证 64 个并发客户端、4 个并发数据库连接、唯一索引、旧库迁移、重复注册、撤销不回收、138/139 边界和号池耗尽；Connector 集成覆盖旧缓存从服务端补号及持久化。
 
 ## 报告与排查
+
+### 公开访客真实端到端与录屏
+
+`scripts/public-e2e-server.ts` 创建独立测试 Agent、临时目录和本地 Relay，`record-public-e2e.mjs` 用 gstack browse 操作真实 Portal，并通过源代码中的技能 CLI 调用真实 DeepSeek 和 Microsandbox；`encode-public-e2e.mjs` 输出连续 MP4 及单独的精简版（只裁等待，不加速）。每次使用新的 `A2A_REAL_REPORT` 目录，必须明确设置 `A2A_REAL_E2E=1`。详细环境变量、执行步骤和用例表见 [dsh-a2a 测试指南](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/test-cases-public-visitors.md)。
+
+新增覆盖：无凭据读名片不登记、缺失原身份拒绝继续 context、公开邀请不覆盖受邀凭据、跨 Agent 开关独立、旧插件提示重启并禁用公开邀请，以及真正停止进程后释放端口。录制还校验两位公开访客各自的随机文件、Python 只读边界、第六次拒绝、关闭公开访问不影响受邀访客、重启保留额度及私有文件。测试观察台展示实际 CLI 输出，不是产品聊天页面。
 
 ### 真实模型整链测试（主动调用模型，会产生费用）
 

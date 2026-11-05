@@ -5,8 +5,8 @@ import type { PublicationStatus } from '@talk2myagent/a2a-connector'
 let session: Promise<{ csrfToken: string; defaultRelayHost: string }> | undefined
 const localSession = () => session ??= get<{ csrfToken: string; defaultRelayHost: string }>('/api/session').catch(error => { session = undefined; throw error })
 
-async function get<T>(path: string): Promise<T> {
-  const response = await fetch(path)
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(path, signal ? { signal } : undefined)
   if (!response.ok) throw new Error(`请求失败（HTTP ${response.status}）`)
   return await response.json() as T
 }
@@ -52,7 +52,9 @@ export const api = {
   setPublication: (id: string, config: { enabled: boolean; provider: 'default' | 'custom'; host: string; contactId?: string }) => post<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/config`, config, 'PUT'),
   resetPublication: (id: string) => post<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/reset`, {}),
   invitation: (id: string, peerName: string) => post<{ text: string; notice: string; online: boolean }>(`/api/agents/${encodeURIComponent(id)}/publication/invitation`, { peerName }),
-  addVisitor: (id: string, displayName: string, token: string) => post<{ peer: { name: string; displayName: string }; requiresRestart: boolean }>(`/api/agents/${encodeURIComponent(id)}/visitors`, { displayName, token }),
+  addVisitor: (id: string, displayName: string, token: string) => post<{ peer: { name: string; displayName: string }; applied: boolean; requiresRestart: boolean }>(`/api/agents/${encodeURIComponent(id)}/visitors`, { displayName, token }),
+  publicVisitors: (id: string, signal?: AbortSignal) => get<{ enabled: boolean; turnLimit: number; requiresRestart: boolean }>(`/api/agents/${encodeURIComponent(id)}/public-visitors`, signal),
+  setPublicVisitors: (id: string, enabled: boolean) => post<{ enabled: boolean; turnLimit: number; requiresRestart: boolean }>(`/api/agents/${encodeURIComponent(id)}/public-visitors`, { enabled }, 'PUT'),
   detect: () => get<DetectResult>('/api/detect'),
   agents: () => get<AgentSummary[]>('/api/agents'),
   agent: (id: string) => get<AgentDetail>(`/api/agents/${encodeURIComponent(id)}`),

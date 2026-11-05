@@ -14,10 +14,12 @@ test('first start upgrades the plugin automatically, forwards progress, caches i
   const install = async (profile: string, source: string) => {
     installs++
     assert.equal(profile, 'fixture')
-    assert.equal(source, process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.4.0')
+    assert.equal(source, process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.4.1')
     const directory = join(root, 'profiles/fixture/node_modules/dsh-a2a-server')
     await mkdir(join(directory, 'lib'), { recursive: true })
-    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dsh-a2a-server', version: '0.4.0', type: 'module' }))
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dsh-a2a-server', version: '0.4.1', type: 'module' }))
+    await writeFile(join(directory, 'lib/public-visitors.js'), 'export {}')
+    await writeFile(join(directory, 'lib/live-visitors.js'), 'export {}')
     await writeFile(join(directory, 'lib/microsandbox-runtime.js'), `export async function prepareMicrosandbox({onProgress}) {
       onProgress?.({phase:'image',message:'fixture image download'});
       onProgress?.({phase:'ready',message:'fixture ready'});
@@ -49,6 +51,14 @@ test('first start upgrades the plugin automatically, forwards progress, caches i
     assert.deepEqual(events.map(e => e.phase), ['checking','installing','image','ready'])
     await requireVisitorRuntime('fixture', { install })
     assert.equal(installs, 1, 'cached runtime must not reinstall')
+    await writeFile(join(root, 'profiles/fixture/node_modules/dsh-a2a-server/package.json'), JSON.stringify({ name: 'dsh-a2a-server', version: '0.4.0', type: 'module' }))
+    await requireVisitorRuntime('fixture', { publicVisitors: false, install })
+    assert.equal(installs, 2, 'old profiles upgrade even with public access disabled, for live invited visitors')
+    await requireVisitorRuntime('fixture', { publicVisitors: true, install })
+    assert.equal(installs, 2, 'full visitor runtime is cached')
+    await rm(join(root, 'profiles/fixture/node_modules/dsh-a2a-server/lib/live-visitors.js'))
+    await requireVisitorRuntime('fixture', { install })
+    assert.equal(installs, 3, 'incomplete or stale development builds are repaired')
     assert.equal(sandboxSupport('darwin','arm64').supported, true)
     assert.equal(sandboxSupport('darwin','x64').supported, false)
     assert.equal(sandboxSupport('win32','x64').supported, true)

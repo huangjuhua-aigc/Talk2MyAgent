@@ -4,7 +4,7 @@
 
 用户不需要安装 Tailscale，也不用填写本地端口或配对码。在 Portal 选择“公网中继”，可以先注册固定地址、准备邀请，再启动 Agent。后台 Connector 会在 Agent 就绪后自动连接同一个地址。
 
-Relay 的独立开源仓库：[a2a-relay-server](https://github.com/huangjuhua-aigc/a2a-relay-server)。Portal 与调用技能使用 0.2.0；本分支的 Microsandbox 和安全停止功能需要配套的 DSH 协议插件 0.4.0。
+Relay 的独立开源仓库：[a2a-relay-server](https://github.com/huangjuhua-aigc/a2a-relay-server)。Portal 与调用技能使用 0.3.0；本分支的 Microsandbox 和安全停止功能需要配套的 DSH 协议插件 0.4.1。
 
 ## 用户操作
 
@@ -64,7 +64,7 @@ pnpm --filter @talk2myagent/a2a-host start unpublish AGENT_ID
 
 ## 本地开发版安装
 
-插件 `0.4.0` 已发布到 npm，正常启动无需设置开发变量。DSH `0.2.1-rc.2` 已满足兼容要求。以下步骤仅用于测试本地尚未发布的修改。
+插件 `0.4.1` 已发布到 npm，正常启动无需设置开发变量。DSH `0.2.1-rc.2` 已满足兼容要求。以下步骤仅用于测试本地尚未发布的修改。
 
 先在 dsh-a2a 插件仓库构建并打包，再为 Portal 指定安装包（PowerShell 示例）：
 
@@ -73,7 +73,7 @@ cd D:\code\dsh-a2a
 pnpm build
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.a2a\packages" | Out-Null
 npm pack --pack-destination "$env:USERPROFILE\.a2a\packages"
-$env:A2A_PLUGIN_SOURCE = "$env:USERPROFILE\.a2a\packages\dsh-a2a-server-0.4.0.tgz"
+$env:A2A_PLUGIN_SOURCE = "$env:USERPROFILE\.a2a\packages\dsh-a2a-server-0.4.1.tgz"
 pnpm --dir D:\code\Talk2MyAgent\packages\a2a-host start
 ```
 
