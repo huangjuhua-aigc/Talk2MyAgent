@@ -140,6 +140,7 @@ summary { cursor: pointer; min-height: 48px; padding: 12px 0; color: #465571; fo
 .publication-card .section-heading { align-items: center; }
 .publication-settings { max-width: 100%; }
 .publication-settings label.field { margin: 0 0 20px; }
+.publication-settings > .row + .row { margin-top: 16px; }
 .publication-address { display: flex; align-items: center; gap: 12px; background: #edf7f2; border: 1px solid #cde6d9; padding: 16px; border-radius: 10px; margin: 20px 0; }
 .publication-address .grow { min-width: 0; }
 .publication-address .public-url { color: #175a47; overflow-wrap: anywhere; font-size: 13px; }
@@ -211,6 +212,7 @@ summary { cursor: pointer; min-height: 48px; padding: 12px 0; color: #465571; fo
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
 }
 .visitor-add-area { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border, #dbe2f1); }
+.public-visitors-setting { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border, #dbe2f1); }
 .visitor-add-button { min-height: 48px; width: 100%; border-style: dashed; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .visitor-add-button > span { font-size: 24px; line-height: 1; }
 .visitor-add-area form { max-width: 640px; }

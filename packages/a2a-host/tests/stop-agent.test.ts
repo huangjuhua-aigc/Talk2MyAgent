@@ -18,7 +18,7 @@ test('host never kills the Agent before its private IPC confirms disks are stopp
   })
   await new Promise<void>(r=>server.listen(agentManagementPath(record.id),r))
   try {
-    const runner = {running:true,stop:()=>{kills++;return true}}
+    const runner = {running:true,stop:async()=>{kills++;return true}}
     await assert.rejects(stopAgent(record,runner),/已保留进程/)
     assert.equal(kills,0)
     acknowledge=true

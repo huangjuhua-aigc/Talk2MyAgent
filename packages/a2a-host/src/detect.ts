@@ -10,6 +10,7 @@ import type { DetectResult, HostState, KeyStatus } from './types.ts'
 import { credentialsPath, statePath } from './paths.ts'
 import { PROVIDERS } from './providers.ts'
 import { sandboxSupport } from './visitor-runtime.ts'
+import { visitorExecution } from './visitor-execution.ts'
 
 /** Run a command briefly and report whether it answered, plus its output. */
 async function run(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
@@ -165,7 +166,7 @@ export async function detect(profile: string): Promise<DetectResult> {
     dsh: dsh.ok
       ? { installed: true, version: dsh.output.trim().split('\n')[0]?.slice(0, 80) }
       : { installed: false },
-    sandbox: { ...sandboxSupport(), automatic: true },
+    sandbox: { ...sandboxSupport(), automatic: visitorExecution() === 'microsandbox' },
     keys: await scanKeys(),
     lanIps: await detectLanIps(),
     profile: {

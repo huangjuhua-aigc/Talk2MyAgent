@@ -231,7 +231,7 @@ function DetectScreen(props: {
     if (!result.dsh.installed) {
       steps.push('安装 DeepSeek Harness CLI：npm install -g @deepseek-ai/dsh，装完运行 dsh --version 确认能输出版本号。')
     }
-    if (!result.sandbox.supported) {
+    if (result.sandbox.automatic && !result.sandbox.supported) {
       steps.push(result.sandbox.reason ?? '请使用支持本地沙箱的系统。')
     }
     if (!Object.values(result.keys).some(key => key.configured)) {
@@ -243,7 +243,7 @@ function DetectScreen(props: {
   }
 
   const missing = result !== undefined
-    && (!result.node.ok || !result.dsh.installed || !result.sandbox.supported || !Object.values(result.keys).some(key => key.configured))
+    && (!result.node.ok || !result.dsh.installed || (result.sandbox.automatic && !result.sandbox.supported) || !Object.values(result.keys).some(key => key.configured))
 
   const chip = (ok: boolean, okText: string, badText: string): React.JSX.Element => (
     <span className={`chip ${ok ? 'ok' : 'warn'}`}>{ok ? okText : badText}</span>
@@ -264,7 +264,9 @@ function DetectScreen(props: {
           </div>
           <div className="row">
             <span className="grow">访客独立沙箱</span>
-            {chip(result.sandbox.supported, '启动时自动准备', result.sandbox.reason ?? '当前系统暂不支持')}
+            {result.sandbox.automatic
+              ? chip(result.sandbox.supported, '启动时自动准备', result.sandbox.reason ?? '当前系统暂不支持')
+              : <span className="chip">已关闭，使用受限只读工具</span>}
           </div>
           <div className="row">
             <span className="grow">API Key（任选一家）</span>

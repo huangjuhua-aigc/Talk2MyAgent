@@ -17,6 +17,7 @@ import type { HostState, WizardConfig } from './types.ts'
 import { PROVIDERS, normalizeProvider } from './providers.ts'
 import { derivedPublicUrl } from './url.ts'
 import { briefingTaskPrompt } from './briefing.ts'
+import { publicVisitorsPath } from './public-visitors.ts'
 import {
   agentComposePath,
   agentConfigPath,
@@ -29,9 +30,9 @@ import {
   hostHome,
   statePath,
 } from './paths.ts'
+import { visitorExecution } from './visitor-execution.ts'
 
-/** One saved agent as it lives on disk. */import { visitorExecution } from './visitor-runtime.ts'
-
+/** One saved agent as it lives on disk. */
 export interface AgentRecord {
   id: string
   /** The dsh profile this agent launches under. */
@@ -96,6 +97,7 @@ function patchRows(config: WizardConfig, adminRef: string, agentId: string): Rec
         // Admitted visitors may converse and read the configured data directory.
         // The plugin exposes only its scoped read_file; other tools stay denied.
         trustedPeers: config.peers.filter(peer => peer.trusted).map(peer => peer.name),
+        publicVisitors: { enabled: false, settingsFile: publicVisitorsPath(agentId) },
         isolation: {
           // Runtime workspaces are always private, outside the public data root.
           workspaceMode: 'per-peer',

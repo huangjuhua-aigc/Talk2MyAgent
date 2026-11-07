@@ -3,7 +3,7 @@ import { test, afterEach } from 'node:test'
 import { tmpdir } from 'node:os'
 import { parse } from 'yaml'
 import { buildPatchYaml } from '../src/files.ts'
-import { prepareVisitorRuntime, visitorExecution } from '../src/visitor-runtime.ts'
+import { visitorExecution } from '../src/visitor-execution.ts'
 import type { WizardConfig } from '../src/types.ts'
 
 const original = process.env['A2A_VISITOR_EXECUTION']
@@ -32,17 +32,6 @@ test('patch execution follows A2A_VISITOR_EXECUTION', () => {
   assert.equal(execution(), 'read-only')
   process.env['A2A_VISITOR_EXECUTION'] = 'typo'
   assert.throws(() => execution(), /Invalid A2A_VISITOR_EXECUTION/)
-})
-
-test('start preparation skips Microsandbox readiness only when opted out', async () => {
-  const calls: string[] = []
-  const require = async (profile: string): Promise<void> => { calls.push(profile) }
-  assert.equal(await prepareVisitorRuntime('p1', { env: {}, require }), 'microsandbox')
-  assert.deepEqual(calls, ['p1'])
-  assert.equal(await prepareVisitorRuntime('p2', { env: { A2A_VISITOR_EXECUTION: 'read-only' }, require }), 'read-only')
-  assert.deepEqual(calls, ['p1'])
-  await assert.rejects(prepareVisitorRuntime('p3', { env: { A2A_VISITOR_EXECUTION: 'bogus' }, require }), /Invalid/)
-  assert.deepEqual(calls, ['p1'])
 })
 
 test('switching execution mode invalidates the applied runtime until restart', async () => {

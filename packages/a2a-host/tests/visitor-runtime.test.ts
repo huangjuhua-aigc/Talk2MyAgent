@@ -14,10 +14,12 @@ test('first start upgrades the plugin automatically, forwards progress, caches i
   const install = async (profile: string, source: string) => {
     installs++
     assert.equal(profile, 'fixture')
-    assert.equal(source, process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.4.0')
+    assert.equal(source, process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.4.1')
     const directory = join(root, 'profiles/fixture/node_modules/dsh-a2a-server')
     await mkdir(join(directory, 'lib'), { recursive: true })
-    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dsh-a2a-server', version: '0.4.0', type: 'module' }))
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dsh-a2a-server', version: '0.4.1', type: 'module' }))
+    await writeFile(join(directory, 'lib/public-visitors.js'), 'export {}')
+    await writeFile(join(directory, 'lib/live-visitors.js'), 'export {}')
     await writeFile(join(directory, 'lib/microsandbox-runtime.js'), `export async function prepareMicrosandbox({onProgress}) {
       onProgress?.({phase:'image',message:'fixture image download'});
       onProgress?.({phase:'ready',message:'fixture ready'});
@@ -49,6 +51,14 @@ test('first start upgrades the plugin automatically, forwards progress, caches i
     assert.deepEqual(events.map(e => e.phase), ['checking','installing','image','ready'])
     await requireVisitorRuntime('fixture', { install })
     assert.equal(installs, 1, 'cached runtime must not reinstall')
+    await writeFile(join(root, 'profiles/fixture/node_modules/dsh-a2a-server/package.json'), JSON.stringify({ name: 'dsh-a2a-server', version: '0.4.0', type: 'module' }))
+    await requireVisitorRuntime('fixture', { publicVisitors: false, install })
+    assert.equal(installs, 2, 'old profiles upgrade even with public access disabled, for live invited visitors')
+    await requireVisitorRuntime('fixture', { publicVisitors: true, install })
+    assert.equal(installs, 2, 'full visitor runtime is cached')
+    await rm(join(root, 'profiles/fixture/node_modules/dsh-a2a-server/lib/live-visitors.js'))
+    await requireVisitorRuntime('fixture', { install })
+    assert.equal(installs, 3, 'incomplete or stale development builds are repaired')
     assert.equal(sandboxSupport('darwin','arm64').supported, true)
     assert.equal(sandboxSupport('darwin','x64').supported, false)
     assert.equal(sandboxSupport('win32','x64').supported, true)
@@ -57,4 +67,33 @@ test('first start upgrades the plugin automatically, forwards progress, caches i
     if (!resolve(root).startsWith(resolve(tmpdir()) + sep)) throw new Error('Unsafe cleanup')
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('read-only startup upgrades the visitor plugin without loading Microsandbox', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'a2a-read-only-upgrade-'))
+  const restore = ['DSH_HOME', 'A2A_VISITOR_EXECUTION'].map(key => [key, process.env[key]] as const)
+  t.after(async () => {
+    for (const [key, value] of restore) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    await rm(root, { recursive: true, force: true })
+  })
+  process.env['DSH_HOME'] = root
+  process.env['A2A_VISITOR_EXECUTION'] = 'read-only'
+  const directory = join(root, 'profiles/fixture/node_modules/dsh-a2a-server')
+  const manifest = join(directory, 'package.json')
+  const writeVersion = (version: string) => writeFile(manifest, JSON.stringify({ name: 'dsh-a2a-server', version, type: 'module' }))
+  await mkdir(join(directory, 'lib'), { recursive: true })
+  await writeVersion('0.4.0')
+  await writeFile(join(directory, 'lib/microsandbox-runtime.js'), "throw new Error('VM module loaded in read-only mode')")
+  const install = t.mock.fn(async () => {
+    await writeVersion('0.4.1')
+    for (const name of ['public-visitors', 'live-visitors']) await writeFile(join(directory, 'lib', name + '.js'), 'export {}')
+    return { ok: true, output: '' }
+  })
+  await assert.rejects(requireVisitorRuntime('fixture', { install: async () => ({ ok: false, output: 'fixture offline' }) }), /fixture offline/)
+  await requireVisitorRuntime('fixture', { install, publicVisitors: false })
+  await requireVisitorRuntime('fixture', { install, publicVisitors: true })
+  assert.equal(install.mock.callCount(), 1)
 })

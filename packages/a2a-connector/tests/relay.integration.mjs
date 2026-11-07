@@ -165,6 +165,24 @@ test('legacy cached registrations fetch their number from Relay without changing
   } finally {c.stop();await f.close()}
 })
 
+test('a cached UUID registration without configured phone input migrates to its confirmed alias and preserves old links', async () => {
+  const f = await fixture(), state = { registrations: {}, desiredEnabled: true, revision: 1, operationId: randomUUID() }
+  let snapshot
+  const c = new Connector({ config: f.config, state, save: async () => {}, onStatus: value => { snapshot = value } })
+  try {
+    const r = await c.register(), token = r.token, publicationId = r.info.publicationId
+    r.info = await control(f.config.relayOrigin, '/v1/publication', token) // Previous versions cached the raw UUID endpoints.
+    const legacyCard = r.info.publicCardUrl
+    assert.ok(r.info.publicRpcUrl.includes(publicationId)); assert.equal(f.config.contactId, undefined)
+    void c.start(); await until(() => snapshot?.state === 'online')
+    assert.equal(snapshot.publicRpcUrl, `${f.config.relayOrigin}/r/${r.info.contactId}/a2a`)
+    assert.equal((await (await fetch(snapshot.publicCardUrl)).json()).supportedInterfaces[0].url, snapshot.publicRpcUrl)
+    assert.equal((await fetch(legacyCard)).status, 200)
+    assert.equal(r.token, token); assert.equal(r.info.publicationId, publicationId)
+    assert.equal(f.relay.store.db.prepare('SELECT count(*) AS n FROM agents').get().n, 1)
+  } finally { c.stop(); await f.close() }
+})
+
 test('concurrency is bounded and visitor disconnects release every flow without replay', async () => {
   const f = await fixture(), state = { registrations:{}, desiredEnabled:true, revision:1, operationId:randomUUID() }
   let s

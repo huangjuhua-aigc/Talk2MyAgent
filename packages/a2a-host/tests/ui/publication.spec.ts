@@ -1,7 +1,7 @@
 import { test as base, expect } from './fixtures.ts'
 import { startPortal } from '../support/portal.ts'
 import { startTestRelay } from '../support/relay.ts'
-import { command, status } from '@talk2myagent/a2a-connector'
+import { command, status, configure, register } from '@talk2myagent/a2a-connector'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -39,6 +39,35 @@ test('an old stopped Relay address does not lock the number field for the select
   await number.fill('18612345678')
   await expect(card.getByRole('button',{name:'获取中继地址'})).toBeEnabled()
   await expect(card.getByTestId('relay-url')).toHaveCount(0)
+})
+
+test('an existing UUID cache displays, copies and invites through its Relay-confirmed phone address without resetting identity', async ({ page, portal }, testInfo) => {
+  const record = await portal.readRecord(portal.agents[0]!.record.id)
+  record.config.network = { ...record.config.network, mode: 'relay', relay: { provider: 'default', enabled: false } }
+  await writeFile(join(portal.host, 'agents', `${record.id}.json`), JSON.stringify(record))
+  const session = await (await fetch(`${portal.baseURL}/api/session`)).json() as { defaultRelayHost: string }
+  const dir = join(portal.host, 'relay', record.id), local = `http://127.0.0.1:${record.config.network.port}`
+  await configure(dir, { relayOrigin: session.defaultRelayHost, localRpcUrl: `${local}/a2a`, localCardUrl: `${local}/.well-known/agent-card.json`, displayName: 'Legacy Agent', allowHttp: true })
+  const reserved = await register(dir)
+  await command(dir, 'shutdown'); await expect.poll(async () => (await status(dir)).instanceId).toBeUndefined()
+  const saved = JSON.parse(await readFile(join(dir, 'state.json'), 'utf8'))
+  const info = saved.registrations[session.defaultRelayHost].info
+  info.publicRpcUrl = `${session.defaultRelayHost}/r/${info.publicationId}/a2a`
+  info.publicCardUrl = `${session.defaultRelayHost}/r/${info.publicationId}/.well-known/agent-card.json`
+  await writeFile(join(dir, 'state.json'), JSON.stringify(saved))
+  await page.reload()
+  const card = page.getByRole('region', { name: '公网中继' }), visitors = page.getByRole('region', { name: '邀请访客聊天' })
+  const phoneUrl = `${session.defaultRelayHost}/r/${reserved.contactId}/a2a`
+  await expect(card.getByTestId('relay-url')).toHaveText(phoneUrl)
+  await expect(card.getByLabel('手机号（公开编号）')).toHaveValue(reserved.contactId!)
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await card.getByRole('button', { name: '复制地址', exact: true }).click()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(phoneUrl)
+  await visitors.getByRole('button', { name: '复制聊天邀请', exact: true }).click()
+  await expect(visitors.getByTestId('relay-invitation')).toContainText(phoneUrl)
+  await expect(visitors.getByTestId('relay-invitation')).not.toContainText(reserved.publicationId!)
+  expect(JSON.parse(await readFile(join(dir, 'state.json'), 'utf8')).registrations).toEqual(saved.registrations)
+  await card.screenshot({ path: testInfo.outputPath('legacy-phone-address.png') })
 })
 
 test('mobile number validation, duplicate rejection and correction preserve the existing owner', async ({ page, portal }) => {

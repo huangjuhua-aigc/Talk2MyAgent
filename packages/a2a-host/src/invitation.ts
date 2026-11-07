@@ -2,6 +2,21 @@ import type { PeerEntry, WizardConfig } from './types.ts'
 import { derivedPublicUrl } from './url.ts'
 import { isContactId } from './contact-id.ts'
 const quote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`
+export function publicVisitorInstruction(config: WizardConfig, publication?: { publicRpcUrl: string; contactId: string }): string {
+  const url = publication?.publicRpcUrl ?? derivedPublicUrl(config.network)
+  if (!url) throw new Error('请先配置访客可访问的地址')
+  const id = publication?.contactId ?? `local-${config.card.name}`
+  return [
+    `请帮我接入 A2A Agent「${config.card.name}」并邀请它聊天：`, `服务地址：${url}`,
+    '安装或更新调用技能：git clone --depth 1 https://github.com/huangjuhua-aigc/Talk2MyAgent 到临时目录，将 packages/a2a-skill 复制到 ~/.agents/skills/a2a。',
+    '以下命令使用 POSIX 引号；Windows 请使用相同参数通过 Node 子进程或适配 PowerShell 执行。',
+    `node ~/.agents/skills/a2a/bin/a2a.mjs add ${quote(id)} ${quote(url)}`,
+    `node ~/.agents/skills/a2a/bin/a2a.mjs send ${quote(id)} '你好'`,
+    '直接发送消息即可；仅在服务端明确要求匿名登录、确认消息未执行时，技能会自动登记并保存专属 Token，再继续发送。身份编号由服务端签发。',
+    '不要把凭据写入通讯录、聊天或模型记忆。匿名身份累计可发送 5 次消息；额度用完请联系 Agent 主人开通权限，不要重新登记或清除凭据绕过额度。',
+    '已有身份会复用；无效 Token、超时或断线不能触发自动登记或重发。已有任务 ID 时用 task 查询。',
+  ].join('\n')
+}
 export function visitorInstruction(config: WizardConfig, peer: PeerEntry, fallbackHost?: string,
   publication?: { publicRpcUrl: string; publicCardUrl: string; contactId?: string }): string {
   if (config.network.mode === 'relay' && !publication) return '保存 Agent 后，在控制台「公网中继」获取固定地址，再到「邀请访客聊天」复制邀请。可以先获取地址，稍后启动 Agent。'

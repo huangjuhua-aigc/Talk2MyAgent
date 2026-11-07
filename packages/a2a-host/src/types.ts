@@ -88,7 +88,7 @@ export interface KeyStatus {
 export interface DetectResult {
   node: { version: string; ok: boolean }
   dsh: { installed: boolean; version?: string | undefined }
-  sandbox: { supported: boolean; automatic: true; reason?: string }
+  sandbox: { supported: boolean; automatic: boolean; reason?: string }
   /** Status of every provider family's key reference. */
   keys: Record<string, KeyStatus>
   /** This machine's LAN IPv4 addresses, best-route one first. */
@@ -121,6 +121,7 @@ export interface MonitorContext {
 }
 
 export interface MonitorSnapshot {
+  publicVisitors?: { enabled: boolean; turnLimit: number; managed: boolean }
   generatedAt: string
   contexts: MonitorContext[]
 }

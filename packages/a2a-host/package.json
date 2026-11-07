@@ -1,10 +1,12 @@
 {
   "name": "@talk2myagent/a2a-host",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Local console for opening your dsh agent to A2A visitors: setup wizard + monitoring",
   "type": "module",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "bin": {
     "a2a-host": "dist/cli.js"
   },

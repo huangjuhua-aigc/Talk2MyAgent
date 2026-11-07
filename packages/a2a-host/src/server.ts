@@ -29,7 +29,7 @@ import { fetchSnapshot } from './monitor.ts'
 import { automaticBriefingEnabled, setAutomaticBriefing } from './briefing.ts'
 import { resolveBindHost } from './url.ts'
 import { prepareAgentWorkspaces } from './isolation.ts'
-import { prepareVisitorRuntime, visitorPluginSource } from './visitor-runtime.ts'
+import { requireVisitorRuntime, visitorPluginSource } from './visitor-runtime.ts'
 import { assertPortAvailable } from './ports.ts'
 import { waitForAgentReady } from './readiness.ts'
 import { stopAgent } from './stop-agent.ts'
@@ -37,8 +37,9 @@ import { pickDirectory } from './pick.ts'
 import { agentPatchPath, agentManagementPath } from './paths.ts'
 import type { WizardConfig, StartupProgress } from './types.ts'
 import { randomBytes } from 'node:crypto'
-import { appliedVisitors, defaultRelayHost, invitation, publicationStatus, publish, requestPublication, recordRuntime, resetPublicationIdentity, stopPublication, validateSharedRoots } from './publication.ts'
+import { appliedVisitors, applyVisitorLive, defaultRelayHost, invitation, publicationStatus, publish, requestPublication, recordRuntime, resetPublicationIdentity, stopPublication, validateSharedRoots } from './publication.ts'
 import { newVisitor } from './visitors.ts'
+import { publicVisitorsEnabled, setPublicVisitors } from './public-visitors.ts'
 
 /** Fixed by design: the vite dev proxy expects this port. */
 const PORT = Number(process.env['A2A_HOST_PORT'] ?? 17890)
@@ -216,14 +217,29 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     return
   }
 
+  if (sub === 'public-visitors' && ['GET', 'PUT'].includes(req.method ?? '')) {
+    if (req.method === 'PUT') {
+      const body = await readBody(req) as { enabled?: unknown }
+      if (typeof body.enabled !== 'boolean') { json(res, 400, { error: 'enabled must be a boolean' }); return }
+      // Closing access must remain possible even if the current workspace is invalid.
+      if (body.enabled) { await validateSharedRoots(record.config); await refreshAgentPatch(record) }
+      await setPublicVisitors(id, body.enabled)
+    }
+    const snapshot = runner.running ? await fetchSnapshot(agentManagementPath(id), record.config.adminToken) : undefined
+    const applied = snapshot?.ok ? snapshot.snapshot.publicVisitors : undefined
+    json(res, 200, { enabled: await publicVisitorsEnabled(id), turnLimit: 5,
+      requiresRestart: runner.running && !applied?.managed, applied: applied?.enabled }); return
+  }
+
   if (sub === 'visitors' && req.method === 'POST') {
     const body = await readBody(req) as { displayName?: unknown; token?: unknown }
     let peer
     try { peer = newVisitor(record, body) } catch (error) { json(res, 400, { error: (error as Error).message }); return }
     await validateSharedRoots(record.config)
-    await saveAgent({ ...record, config: { ...record.config, peers: [...record.config.peers, peer] }, updatedAt: new Date().toISOString() })
-    // Additive only: existing visitors stay online; the new identity is applied on next start.
-    json(res, 200, { peer: { name: peer.name, displayName: peer.displayName }, requiresRestart: runner.running }); return
+    const updated = { ...record, config: { ...record.config, peers: [...record.config.peers, peer] }, updatedAt: new Date().toISOString() }
+    await saveAgent(updated)
+    const applied = runner.running && await applyVisitorLive(updated, peer)
+    json(res, 200, { peer: { name: peer.name, displayName: peer.displayName }, applied, requiresRestart: runner.running && !applied }); return
   }
 
   if (sub === '' && (req.method === 'PUT' || req.method === 'POST')) {
@@ -293,7 +309,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     const bind = { host: bindHost, port: record.config.network.port }
     if (!runner.running) await assertPortAvailable(bind)
     if (!runner.running) {
-      await prepareVisitorRuntime(record.profile, { onProgress: progress => preparations.set(id, progress) })
+      await requireVisitorRuntime(record.profile, { publicVisitors: await publicVisitorsEnabled(id), onProgress: progress => preparations.set(id, progress) })
       for (const pkg of extraPackages(record.config)) {
         const result = await installPlugin(record.profile, pkg)
         if (!result.ok) throw new Error(`模型插件安装失败：${result.output.slice(-2000)}`)
@@ -304,12 +320,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     // template here would erase the plugin we just installed.
     const firstTime = false
     await refreshAgentPatch(record)
-    preparations.set(id, { phase: 'launching', message: '沙箱环境已就绪，正在启动 Agent…' })
+    preparations.set(id, { phase: 'launching', message: '运行环境已就绪，正在启动 Agent…' })
     const started = runner.start(record.profile, firstTime, agentPatchPath(id), bind)
     try {
       await waitForAgentReady(bind, { isRunning: () => runner.running })
     } catch (error) {
-      if (started) runner.stop()
+      if (started) await runner.stop()
       throw error
     }
     if (started) await recordRuntime(record, bind)
@@ -399,7 +415,7 @@ export async function serve(): Promise<number> {
     if (!allowedHosts.includes(req.headers.host ?? '') || origin !== undefined && !allowedHosts.some(host => origin === `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site') {
       json(res, 403, { error: 'Local same-origin access required' }); return
     }
-    if (!['GET','HEAD'].includes(req.method ?? 'GET') && req.headers['x-a2a-csrf'] !== csrfToken && (origin !== undefined || req.headers['sec-fetch-site'] !== undefined || req.url?.includes('/publication/') || req.url?.endsWith('/visitors'))) {
+    if (!['GET','HEAD'].includes(req.method ?? 'GET') && req.headers['x-a2a-csrf'] !== csrfToken && (origin !== undefined || req.headers['sec-fetch-site'] !== undefined || req.url?.includes('/publication/') || req.url?.endsWith('/visitors') || req.url?.endsWith('/public-visitors'))) {
       json(res, 403, { error: 'Local session token required' }); return
     }
     if (!['GET','HEAD'].includes(req.method ?? 'GET') && (Number(req.headers['content-length'] ?? 0) > 0 || req.headers['transfer-encoding']) && !req.headers['content-type']?.startsWith('application/json')) {
