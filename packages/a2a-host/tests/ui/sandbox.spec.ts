@@ -7,6 +7,19 @@ test('sandbox preparation is automatic in the wizard and does not ask for Docker
   await expect(page.getByText(/安装.*Docker|构建.*镜像/)).toHaveCount(0)
 })
 
+test('an explicit read-only deployment can proceed on a host without VM support', async ({ page }) => {
+  const detection = await page.evaluate(async () => (await fetch('/api/detect')).json())
+  await page.route('**/api/detect', route => route.fulfill({ json: {
+    ...detection, sandbox: { automatic: false, supported: false, reason: 'fixture unsupported hypervisor' },
+  } }))
+  await page.reload()
+  await page.getByRole('button', { name: '+ 新建 Agent', exact: true }).click()
+  await expect(page.getByText('已关闭，使用受限只读工具')).toBeVisible()
+  await expect(page.getByText('fixture unsupported hypervisor')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /复制安装指令/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /继续/ })).toBeEnabled()
+})
+
 test('start shows preparation progress, prevents duplicates, explains a missing hypervisor, and retries', async ({ page, portal }) => {
   const id = portal.agents[0]!.record.id
   let message = '首次使用，正在自动下载沙箱组件…', attempts = 0

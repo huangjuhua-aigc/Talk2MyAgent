@@ -68,3 +68,32 @@ test('first start upgrades the plugin automatically, forwards progress, caches i
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('read-only startup upgrades the visitor plugin without loading Microsandbox', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'a2a-read-only-upgrade-'))
+  const restore = ['DSH_HOME', 'A2A_VISITOR_EXECUTION'].map(key => [key, process.env[key]] as const)
+  t.after(async () => {
+    for (const [key, value] of restore) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    await rm(root, { recursive: true, force: true })
+  })
+  process.env['DSH_HOME'] = root
+  process.env['A2A_VISITOR_EXECUTION'] = 'read-only'
+  const directory = join(root, 'profiles/fixture/node_modules/dsh-a2a-server')
+  const manifest = join(directory, 'package.json')
+  const writeVersion = (version: string) => writeFile(manifest, JSON.stringify({ name: 'dsh-a2a-server', version, type: 'module' }))
+  await mkdir(join(directory, 'lib'), { recursive: true })
+  await writeVersion('0.4.0')
+  await writeFile(join(directory, 'lib/microsandbox-runtime.js'), "throw new Error('VM module loaded in read-only mode')")
+  const install = t.mock.fn(async () => {
+    await writeVersion('0.4.1')
+    for (const name of ['public-visitors', 'live-visitors']) await writeFile(join(directory, 'lib', name + '.js'), 'export {}')
+    return { ok: true, output: '' }
+  })
+  await assert.rejects(requireVisitorRuntime('fixture', { install: async () => ({ ok: false, output: 'fixture offline' }) }), /fixture offline/)
+  await requireVisitorRuntime('fixture', { install, publicVisitors: false })
+  await requireVisitorRuntime('fixture', { install, publicVisitors: true })
+  assert.equal(install.mock.callCount(), 1)
+})

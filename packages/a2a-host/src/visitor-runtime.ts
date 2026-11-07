@@ -3,6 +3,7 @@ import { access, readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { dshHome } from './paths.ts'
+import { visitorExecution } from './visitor-execution.ts'
 import { installPlugin } from './dsh.ts'
 import type { StartupProgress } from './types.ts'
 
@@ -36,9 +37,12 @@ export async function requireVisitorRuntime(profile: string, options: {
   install?: typeof installPlugin
 } = {}): Promise<void> {
   if (!/^[A-Za-z0-9_-]+$/.test(profile)) throw new Error('Invalid profile')
-  const support = sandboxSupport()
-  if (!support.supported) throw new Error(support.reason)
-  options.onProgress?.({ phase: 'checking', message: '正在检查访客沙箱…' })
+  const execution = visitorExecution()
+  if (execution === 'microsandbox') {
+    const support = sandboxSupport()
+    if (!support.supported) throw new Error(support.reason)
+  }
+  options.onProgress?.({ phase: 'checking', message: '正在检查访客插件…' })
   let file = await installedRuntime(profile)
   if (!file) {
     options.onProgress?.({ phase: 'installing', message: '正在自动更新 Agent 的沙箱插件…' })
@@ -54,6 +58,7 @@ export async function requireVisitorRuntime(profile: string, options: {
     file = await installedRuntime(profile)
     if (!file) throw new Error('当前插件不支持完整访客管理，需要 dsh-a2a-server 0.4.1 或更高版本')
   }
+  if (execution === 'read-only') return
   const url = pathToFileURL(file)
   url.searchParams.set('version', String((await stat(file)).mtimeMs))
   const runtime = await import(url.href) as { prepareMicrosandbox: (options: { onProgress?: (progress: StartupProgress) => void }) => Promise<unknown> }

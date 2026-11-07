@@ -320,7 +320,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     // template here would erase the plugin we just installed.
     const firstTime = false
     await refreshAgentPatch(record)
-    preparations.set(id, { phase: 'launching', message: '沙箱环境已就绪，正在启动 Agent…' })
+    preparations.set(id, { phase: 'launching', message: '运行环境已就绪，正在启动 Agent…' })
     const started = runner.start(record.profile, firstTime, agentPatchPath(id), bind)
     try {
       await waitForAgentReady(bind, { isRunning: () => runner.running })
