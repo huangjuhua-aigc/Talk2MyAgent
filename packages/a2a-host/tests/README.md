@@ -89,6 +89,8 @@ node --import tsx --test tests/visitor-runtime.integration.test.ts
 
 ## 报告与排查
 
+`dsh-log.test.ts` 与 `readiness.test.ts` 覆盖插件加载失败时立即返回具体原因、忽略上一次启动的错误、读取实际日志文件及隐藏登录令牌。DSH 网页端口可用并不代表 A2A 插件已启动；Portal/CLI 还会验证 Agent Card。2026-11-17 在本机实际复现公共资料硬链接导致的插件加载失败，页面已能显示具体文件而非只报超时；隔离规则未放宽。
+
 ### 公开访客真实端到端与录屏
 
 `scripts/public-e2e-server.ts` 创建独立测试 Agent、临时目录和本地 Relay，`record-public-e2e.mjs` 用 gstack browse 操作真实 Portal，并通过源代码中的技能 CLI 调用真实 DeepSeek 和 Microsandbox；`encode-public-e2e.mjs` 输出连续 MP4 及单独的精简版（只裁等待，不加速）。每次使用新的 `A2A_REAL_REPORT` 目录，必须明确设置 `A2A_REAL_E2E=1`。详细环境变量、执行步骤和用例表见 [dsh-a2a 测试指南](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/test-cases-public-visitors.md)。

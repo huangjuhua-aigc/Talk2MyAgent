@@ -31,6 +31,7 @@ import {
   statePath,
 } from './paths.ts'
 import { visitorExecution } from './visitor-execution.ts'
+import { calendarConnectionPath } from './calendar.ts'
 
 /** One saved agent as it lives on disk. */
 export interface AgentRecord {
@@ -98,6 +99,7 @@ function patchRows(config: WizardConfig, adminRef: string, agentId: string): Rec
         // The plugin exposes only its scoped read_file; other tools stay denied.
         trustedPeers: config.peers.filter(peer => peer.trusted).map(peer => peer.name),
         publicVisitors: { enabled: false, settingsFile: publicVisitorsPath(agentId) },
+        ...(existsSync(calendarConnectionPath(agentId)) ? { calendar: { connectionFile: calendarConnectionPath(agentId), mode: 'auto', instructions: process.env['A2A_CALENDAR_INSTRUCTIONS'] || '' } } : {}),
         isolation: {
           // Runtime workspaces are always private, outside the public data root.
           workspaceMode: 'per-peer',

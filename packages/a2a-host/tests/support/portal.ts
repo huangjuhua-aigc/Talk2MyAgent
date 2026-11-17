@@ -6,7 +6,7 @@ import { randomUUID, createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { AgentRecord } from '../../src/files.ts'
 
 export interface FixtureAgent {
@@ -18,18 +18,21 @@ export interface FixtureAgent {
   liveVisitorMode: 'supported' | 'unsupported' | 'unconfirmed'
 }
 
-export async function startPortal(agentCount = 2, options: { relayOrigin?: string; publicA2A?: boolean; liveVisitors?: boolean; port?: number } = {}) {
+export async function startPortal(agentCount = 2, options: { calendarFixture?: string; googleClientId?: string; relayOrigin?: string; publicA2A?: boolean; liveVisitors?: boolean; port?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'a2a-ui-'))
   const host = join(root, 'console')
   const agents: FixtureAgent[] = []
   const owners: Server[] = []
   let child: ChildProcess | undefined
-  const close = async (): Promise<void> => {
+  const stopServer = async (): Promise<void> => {
     if (child && child.exitCode === null && child.signalCode === null) {
       const stopped = once(child, 'exit')
       child.kill()
       await stopped
     }
+  }
+  const close = async (): Promise<void> => {
+    await stopServer()
     await Promise.all(owners.map(async owner => {
       owner.closeAllConnections()
       if (owner.listening) await new Promise<void>(done => owner.close(() => done()))
@@ -123,10 +126,12 @@ export async function startPortal(agentCount = 2, options: { relayOrigin?: strin
       const socketPath = process.platform === 'win32' ? `\\\\.\\pipe\\talk2myagent-${id}` : join(host, 'run', `${id}.sock`)
       await new Promise<void>((done, reject) => { owner.once('error', reject); owner.listen(socketPath, done) })
     }
-    child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
+    const startServer = async (): Promise<string> => {
+    child = spawn(process.execPath, ['--import', 'tsx', ...(options.calendarFixture ? ['--import', pathToFileURL(join(process.env['A2A_PLUGIN_SOURCE']!, 'tests/support/calendar-preload.mjs')).href] : []), '--input-type=module', '-e',
       "import { serve } from './src/server.ts'; console.log('PORT=' + await serve());"], {
       cwd: fileURLToPath(new URL('../..', import.meta.url)),
       env: { ...process.env, A2A_HOST_HOME: host, DSH_HOME: join(root, 'dsh'), A2A_HOST_PORT: String(options.port ?? 0),
+        CALENDAR_FIXTURE_ORIGIN: options.calendarFixture ?? '', A2A_GOOGLE_CLIENT_ID: options.googleClientId ?? (options.calendarFixture ? 'test-google-app' : ''), A2A_GOOGLE_CLIENT_SECRET: '',
         A2A_RELAY_DEFAULT_HOST: options.relayOrigin ?? '', A2A_RELAY_ALLOW_LOOPBACK_HTTP: options.relayOrigin ? '1' : '0' },
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     })
@@ -146,7 +151,11 @@ export async function startPortal(agentCount = 2, options: { relayOrigin?: strin
     // Public A2A fixture is already listening; expose a running indicator for publication UI.
     // These tests never use the Agent stop control on this shared fixture process.
     if (options.publicA2A || options.liveVisitors) for (const agent of agents) await writeFile(join(host, 'agents', `${agent.record.id}.pid`), String(processUnderTest.pid))
-    return { root, host, agents, baseURL: `http://127.0.0.1:${port}`, close,
+    return `http://127.0.0.1:${port}`
+    }
+    let baseURL = await startServer()
+    return { root, host, agents, get baseURL() { return baseURL }, close, stopServer,
+      restartServer: async () => { await stopServer(); baseURL = await startServer() },
       readRecord: async (id: string): Promise<AgentRecord> => JSON.parse(await readFile(join(host, 'agents', `${id}.json`), 'utf8')) as AgentRecord }
   } catch (error) { await close(); throw error }
 }

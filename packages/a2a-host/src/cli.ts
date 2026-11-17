@@ -11,6 +11,8 @@
  * @module a2a-host/cli
  */
 
+import { existsSync } from 'node:fs'
+import { calendarConnectionPath } from './calendar.ts'
 import { serve, openBrowser } from './server.ts'
 import { DshRunner } from './dsh.ts'
 import { listAgents, refreshAgentPatch, saveAgent } from './files.ts'
@@ -79,12 +81,12 @@ if (command === 'ui' || command === 'wizard') {
     const bindHost = resolveBindHost(agent.config.network, detected.lanIps)
     const bind = { host: bindHost, port: agent.config.network.port }
     if (!runner.running) {
-      await requireVisitorRuntime(agent.profile, { onProgress: progress => console.log(progress.message) })
+      await requireVisitorRuntime(agent.profile, { calendar: existsSync(calendarConnectionPath(agent.id)), onProgress: progress => console.log(progress.message) })
       await prepareAgentWorkspaces(agent)
     }
     await refreshAgentPatch(agent)
     const started = runner.start(agent.profile, firstTime, agentPatchPath(agent.id), bind)
-    try { await waitForAgentReady(bind, { isRunning: () => runner.running }) }
+    try { await waitForAgentReady(bind, { isRunning: () => runner.running, startupError: () => runner.startupError() }) }
     catch (error) { if (started) await runner.stop(); throw error }
     if (started) await recordRuntime(agent, bind)
     if (agent.config.network.mode === 'relay' && agent.config.network.relay?.enabled !== false) await publish(agent)

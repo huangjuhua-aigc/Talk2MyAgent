@@ -15,6 +15,10 @@ test('Agent readiness waits for the A2A card rather than process spawn or an unr
     await waitForAgentReady({host:'127.0.0.1',port}, {isRunning:()=>true,intervalMs:5,timeoutMs:2000})
     assert.equal(requests,3)
     await assert.rejects(waitForAgentReady({host:'127.0.0.1',port}, {isRunning:()=>false}), /进程已退出/)
+    await assert.rejects(waitForAgentReady({host:'127.0.0.1',port}, {
+      isRunning:()=>true, startupError:()=> '公共资料含硬链接：linked.doc', timeoutMs:2000,
+    }), /A2A 插件启动失败：公共资料含硬链接：linked.doc/)
+    assert.equal(requests,3, 'activation failure must be reported before an HTTP readiness check')
     await assert.rejects(waitForAgentReady({host:'127.0.0.1',port}, {isRunning:()=>true,timeoutMs:0}), /超时/)
   } finally { server.closeAllConnections(); await new Promise<void>(r=>server.close(()=>r())) }
 })

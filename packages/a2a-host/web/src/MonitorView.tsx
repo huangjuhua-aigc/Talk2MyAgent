@@ -15,6 +15,7 @@ import { PublicationCard } from './PublicationCard.tsx'
 import { CollapsibleCard } from './CollapsibleCard.tsx'
 import { StartupNotice } from './StartupNotice.tsx'
 import { VisitorsCard } from './VisitorsCard.tsx'
+import { CalendarCard } from './CalendarCard.tsx'
 
 const STATE_LABELS: Record<string, string> = {
   TASK_STATE_SUBMITTED: '已提交',
@@ -59,7 +60,7 @@ function AgentOverview(props: { detail: AgentDetail; running: boolean | undefine
         {config.peers.length} 位，其中 {trusted} 位可对话、读文件
         （{config.peers.map(peer => peer.displayName ?? peer.name).join('、') || '无'}）
       </SummaryRow>
-      <SummaryRow label="权限">仅可读取指定工作目录；其他工具关闭</SummaryRow>
+      <SummaryRow label="权限">可读取指定工作目录；日历预约需主人另行授权</SummaryRow>
       <SummaryRow label="访客沙箱">每位访客独立；空闲 30 秒暂停、10 分钟停止，私有文件保留</SummaryRow>
       </div>
       {props.children}
@@ -168,6 +169,7 @@ export function MonitorView(props: {
       {detail !== undefined ? <AgentOverview detail={detail} running={running}>{controls}</AgentOverview> : <p className="muted">加载中…</p>}
       {detail !== undefined ? <PublicationCard detail={detail} onChanged={refresh} /> : null}
       {detail !== undefined ? <VisitorsCard key={detail.id} detail={detail} running={running === true} agentBusy={busy} onBusyChange={setBusy} onChanged={refresh} /> : null}
+      <CalendarCard key={`${props.agentId}:calendar`} agentId={props.agentId} running={running} />
       <HandoffCard key={props.agentId} agentId={props.agentId} />
       <CollapsibleCard label="来访记录" storageKey={`${props.agentId}:visitors`}
         heading={<><h2>来访记录</h2><p className="hint">访客的问题与 Agent 的答复，仅在本机显示。</p></>}

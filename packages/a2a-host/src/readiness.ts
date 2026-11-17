@@ -1,11 +1,13 @@
 /** A spawned process is not an online Agent. Wait for its actual A2A surface. */
 export async function waitForAgentReady(bind: { host: string; port: number }, options: {
-  isRunning: () => boolean; timeoutMs?: number; intervalMs?: number
+  isRunning: () => boolean; startupError?: () => string | undefined; timeoutMs?: number; intervalMs?: number
 }): Promise<void> {
   const host = bind.host === '0.0.0.0' ? '127.0.0.1' : bind.host === '::' ? '::1' : bind.host
   const url = `http://${host.includes(':') ? `[${host}]` : host}:${bind.port}/.well-known/agent-card.json`
   const deadline = Date.now() + (options.timeoutMs ?? 120_000)
   while (Date.now() < deadline) {
+    const error = options.startupError?.()
+    if (error) throw new Error(`A2A 插件启动失败：${error}`)
     if (!options.isRunning()) throw new Error('Agent 启动失败，进程已退出；请查看启动日志')
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(Math.max(1, Math.min(1000, deadline - Date.now()))), redirect: 'error' })

@@ -2,9 +2,9 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-Portal provides an off-by-default public visitor switch with five accepted messages per identity. Invited and public visitors share the add/send flow. Only an explicit pre-execution authentication challenge lets the skill register, save its credential and continue the original message once. Exhausted visitors are told to contact the Agent owner for access. This requires plugin 0.4.1. With public admission disabled, only invited visitors have access. See the [client communication and credential contract](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/public-visitors.en.md).
+Portal provides an off-by-default public visitor switch with five accepted messages per identity. Invited and public visitors share the add/send flow. Only an explicit pre-execution authentication challenge lets the skill register, save its credential and continue the original message once. Exhausted visitors are told to contact the Agent owner for access. This requires plugin 0.4.1 or later. With public admission disabled, only invited visitors have access. See the [client communication and credential contract](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/public-visitors.en.md).
 
-Portal uses the published `dsh-a2a-server 0.4.1` with automatically prepared Microsandbox: one VM per visitor, read-only public data and persistent private files. Idle VMs pause after 30 seconds and stop after 10 minutes. Docker is not required; unavailable system virtualization produces an actionable message. Set `A2A_PLUGIN_SOURCE` only for local development. See [local development installation](docs/relay.en.md#local-development-installation) and the [sandbox guide](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.en.md).
+Portal uses the published `dsh-a2a-server 0.5.0` with automatically prepared Microsandbox: one VM per visitor, read-only public data and persistent private files. Idle VMs pause after 30 seconds and stop after 10 minutes. Docker is not required; unavailable system virtualization produces an actionable message. Set `A2A_PLUGIN_SOURCE` only for local development. See [local development installation](docs/relay.en.md#local-development-installation) and the [sandbox guide](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.en.md).
 
 On hosts without nested virtualization, set `A2A_VISITOR_EXECUTION=read-only` before launching the Portal or CLI. The visitor’s `read_file` tool then runs in the host process. The plugin restricts reads to public data and that visitor’s own workspace. Both modes check the visitor plugin version. The default mode, `microsandbox`, also prepares the VM runtime.
 
@@ -31,7 +31,7 @@ pnpm --version
 dsh --version
 ```
 
-This guide uses `dsh-a2a-server@0.4.1`, compatible with DSH `>=0.2.1-rc.2 <0.3.0`. Treat version compatibility errors as installation failures. Plugin documentation: [English](https://github.com/huangjuhua-aigc/dsh-a2a), [简体中文](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md), [release notes](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.md).
+This guide uses `dsh-a2a-server@0.5.0`, compatible with DSH `>=0.2.1-rc.2 <0.3.0`. Treat version compatibility errors as installation failures. Plugin documentation: [English](https://github.com/huangjuhua-aigc/dsh-a2a), [简体中文](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md), [release notes](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.md).
 
 ### 2. Build and launch Portal
 
@@ -69,7 +69,7 @@ Open another terminal. Run the first command **only if the profile does not exis
 
 ```sh
 dsh --profile a2a-my-agent --from-default-profile web --dump-config
-dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.1
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.5.0
 ```
 
 `--dump-config` initializes the Web profile without starting a listener. Resolve any installation error before continuing. In Portal, click 启动 (Start), then 进入控制台 (Open console).
@@ -196,7 +196,7 @@ Stop the agent in Portal, then close the old Portal process. From the `Talk2MyAg
 git pull --ff-only
 pnpm install
 pnpm --filter @talk2myagent/a2a-host run build:web
-dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.1
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.5.0
 pnpm --filter @talk2myagent/a2a-host start
 ```
 
@@ -209,3 +209,7 @@ For local plugin development, clone the adjacent `dsh-a2a` repository, run `pnpm
 This version provides scoped text-file reads, public briefings and an owner Portal. It does not add a visitor web chat UI, tunnel/domain management, PDF/Word/OCR/full-text search, a briefing task list, or complete outbound multi-turn collaboration and context migration.
 
 Automated coverage includes plugin behavior, Portal API/CLI and browser UI workflows. See the [test documentation (Chinese)](packages/a2a-host/tests/README.md). The documented network setup has not been verified between two physical devices; perform the visitor checks above in your environment. Tests use deterministic models and do not validate paid-model output quality.
+
+### Calendar booking (development)
+
+Connect one Google Calendar or Feishu calendar locally from the Portal. Tokens stay encrypted on the computer; the Agent calls the provider directly without another service or Relay changes. On first Google connection, the Portal guides users to import their own Desktop OAuth client JSON; later connections reuse that local configuration. Feishu creates a dedicated app through the official flow. Booking tools activate at Agent startup. See the [calendar setup and test guide](docs/calendar.en.md).

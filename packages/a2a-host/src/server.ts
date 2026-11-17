@@ -40,6 +40,7 @@ import { randomBytes } from 'node:crypto'
 import { appliedVisitors, applyVisitorLive, defaultRelayHost, invitation, publicationStatus, publish, requestPublication, recordRuntime, resetPublicationIdentity, stopPublication, validateSharedRoots } from './publication.ts'
 import { newVisitor } from './visitors.ts'
 import { publicVisitorsEnabled, setPublicVisitors } from './public-visitors.ts'
+import { calendarStatus, startCalendarConnection, pollCalendarConnection, disconnectCalendar, calendarConnectionPath, importCalendarGoogleClient } from './calendar.ts'
 
 /** Fixed by design: the vite dev proxy expects this port. */
 const PORT = Number(process.env['A2A_HOST_PORT'] ?? 17890)
@@ -177,6 +178,30 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
   const runner = runnerFor(id)
 
+  if (sub === 'calendar' && req.method === 'GET') { json(res, 200, await calendarStatus(id)); return }
+  if (sub === 'calendar/google-client' && req.method === 'POST') {
+    await validateSharedRoots(record.config)
+    const body = await readBody(req) as { document?: unknown }
+    try { json(res, 200, await importCalendarGoogleClient(id, body.document)) }
+    catch (error) { json(res, 400, { error: error instanceof Error ? error.message : 'Google 配置导入失败' }) }
+    return
+  }
+  if (sub === 'calendar/connect' && req.method === 'POST') {
+    await validateSharedRoots(record.config)
+    const body = await readBody(req) as { provider?: unknown }
+    json(res, 200, await startCalendarConnection(id, body.provider)); return
+  }
+  if (sub === 'calendar/poll' && req.method === 'POST') {
+    const result = await pollCalendarConnection(id)
+    if (result.status === 'connected') await refreshAgentPatch(record)
+    json(res, 200, result); return
+  }
+  if (sub === 'calendar' && req.method === 'DELETE') {
+    const result = await disconnectCalendar(id)
+    await refreshAgentPatch(record)
+    json(res, 200, result); return
+  }
+
   if (sub === 'publication/status' && req.method === 'GET') {
     json(res, 200, await publicationStatus(id)); return
   }
@@ -264,6 +289,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   if (sub === '' && req.method === 'DELETE') {
     await stopPublication(id)
     await stopAgent(record, runner)
+    await disconnectCalendar(id, true)
     await deleteAgentFiles(id)
     runners.delete(id)
     json(res, 200, { deleted: id })
@@ -309,7 +335,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     const bind = { host: bindHost, port: record.config.network.port }
     if (!runner.running) await assertPortAvailable(bind)
     if (!runner.running) {
-      await requireVisitorRuntime(record.profile, { publicVisitors: await publicVisitorsEnabled(id), onProgress: progress => preparations.set(id, progress) })
+      await requireVisitorRuntime(record.profile, { calendar: existsSync(calendarConnectionPath(id)), publicVisitors: await publicVisitorsEnabled(id), onProgress: progress => preparations.set(id, progress) })
       for (const pkg of extraPackages(record.config)) {
         const result = await installPlugin(record.profile, pkg)
         if (!result.ok) throw new Error(`模型插件安装失败：${result.output.slice(-2000)}`)
@@ -323,7 +349,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     preparations.set(id, { phase: 'launching', message: '运行环境已就绪，正在启动 Agent…' })
     const started = runner.start(record.profile, firstTime, agentPatchPath(id), bind)
     try {
-      await waitForAgentReady(bind, { isRunning: () => runner.running })
+      await waitForAgentReady(bind, { isRunning: () => runner.running, startupError: () => runner.startupError() })
     } catch (error) {
       if (started) await runner.stop()
       throw error
@@ -415,7 +441,7 @@ export async function serve(): Promise<number> {
     if (!allowedHosts.includes(req.headers.host ?? '') || origin !== undefined && !allowedHosts.some(host => origin === `http://${host}`) || req.headers['sec-fetch-site'] === 'cross-site') {
       json(res, 403, { error: 'Local same-origin access required' }); return
     }
-    if (!['GET','HEAD'].includes(req.method ?? 'GET') && req.headers['x-a2a-csrf'] !== csrfToken && (origin !== undefined || req.headers['sec-fetch-site'] !== undefined || req.url?.includes('/publication/') || req.url?.endsWith('/visitors') || req.url?.endsWith('/public-visitors'))) {
+    if (!['GET','HEAD'].includes(req.method ?? 'GET') && req.headers['x-a2a-csrf'] !== csrfToken && (origin !== undefined || req.headers['sec-fetch-site'] !== undefined || req.url?.includes('/calendar') || req.url?.includes('/publication/') || req.url?.endsWith('/visitors') || req.url?.endsWith('/public-visitors'))) {
       json(res, 403, { error: 'Local session token required' }); return
     }
     if (!['GET','HEAD'].includes(req.method ?? 'GET') && (Number(req.headers['content-length'] ?? 0) > 0 || req.headers['transfer-encoding']) && !req.headers['content-type']?.startsWith('application/json')) {

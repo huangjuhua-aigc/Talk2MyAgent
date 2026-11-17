@@ -2,9 +2,9 @@
 
 [简体中文](README.md) · [English](README.en.md)
 
-Portal 支持默认关闭的「允许公开访客」开关，每个公开身份累计 5 次消息。公开与受邀访问统一使用 add/send；首次缺少 Token 时，技能按服务端明确的“消息未执行、需要匿名登录”指引登记、保存凭据并继续原消息，额度用完提示联系主人开通权限。需要插件 0.4.1；未开启时仍只允许受邀访客。详见[客户端通信与凭据约定](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/public-visitors.md)。
+Portal 支持默认关闭的「允许公开访客」开关，每个公开身份累计 5 次消息。公开与受邀访问统一使用 add/send；首次缺少 Token 时，技能按服务端明确的“消息未执行、需要匿名登录”指引登记、保存凭据并继续原消息，额度用完提示联系主人开通权限。需要插件 0.4.1 或更高版本；未开启时仍只允许受邀访客。详见[客户端通信与凭据约定](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/public-visitors.md)。
 
-Portal 使用已发布的 `dsh-a2a-server 0.4.1`：自动准备 Microsandbox，每位访客独立沙箱，公共资料只读、私有文件持久保存，空闲 30 秒暂停、10 分钟停止。无需手动安装 Docker；系统虚拟化未开启时会提示操作。源码测试可以设置 `A2A_PLUGIN_SOURCE`，正常使用无需设置。详见[本地开发版安装](docs/relay.md#本地开发版安装)和[沙箱指南](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.md)。
+Portal 使用已发布的 `dsh-a2a-server 0.5.0`：自动准备 Microsandbox，每位访客独立沙箱，公共资料只读、私有文件持久保存，空闲 30 秒暂停、10 分钟停止。无需手动安装 Docker；系统虚拟化未开启时会提示操作。源码测试可以设置 `A2A_PLUGIN_SOURCE`，正常使用无需设置。详见[本地开发版安装](docs/relay.md#本地开发版安装)和[沙箱指南](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.md)。
 
 如果宿主机不支持嵌套虚拟化，可以在启动 Portal 或 CLI 前设置 `A2A_VISITOR_EXECUTION=read-only`。此时访客的 `read_file` 在宿主进程中运行，只能读取公共资料和该访客自己的工作区；目录限制由插件执行。两种模式都检查访客插件版本。默认模式 `microsandbox` 还会准备独立虚拟机。
 
@@ -50,7 +50,7 @@ pnpm --filter @talk2myagent/a2a-host start
 
 浏览器会打开本机 Portal：[http://127.0.0.1:17890](http://127.0.0.1:17890)。这个地址只用于主人管理，不发给访客。
 
-本指南使用 `dsh-a2a-server@0.4.1`，包含指定目录读取、私有主人入口和自动简报开关。完成下一步的插件安装后再启动 agent。插件的[中文说明](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md)、[英文说明](https://github.com/huangjuhua-aigc/dsh-a2a)和[更新日志](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.zh-CN.md)可单独查阅。
+本指南使用 `dsh-a2a-server@0.5.0`，包含指定目录读取、私有主人入口和自动简报开关。完成下一步的插件安装后再启动 agent。插件的[中文说明](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/README.zh-CN.md)、[英文说明](https://github.com/huangjuhua-aigc/dsh-a2a)和[更新日志](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/CHANGELOG.zh-CN.md)可单独查阅。
 
 ### 3. 在向导里保存配置
 
@@ -74,7 +74,7 @@ pnpm --filter @talk2myagent/a2a-host start
 
 ```sh
 dsh --profile a2a-my-agent --from-default-profile web --dump-config
-dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.4.1
+dsh plugin --profile a2a-my-agent add dsh-a2a-server@0.5.0
 ```
 
 `--dump-config` 在这里用于初始化 Web profile 并输出配置，不启动监听服务。安装失败时先按提示修复，不继续启动。然后回 Portal 点「启动」→「进入控制台」。已有部署升级时，先停止 agent，更新原有 profile 的插件，再从 Portal 启动；详见[升级步骤](docs/guide.md#升级)。
@@ -144,3 +144,7 @@ pnpm --filter @talk2myagent/a2a-skill test
 ## License
 
 MIT
+
+### 日历自动预约（开发版）
+
+Portal 可在本机授权 Google Calendar 或飞书，每个 Agent 连接一个渠道，启动后启用预约技能和工具。token 加密保存在本机，不需要独立日历服务或修改 Relay。Google 首次点击连接时，引导用户导入自己的 Desktop OAuth 客户端 JSON，之后复用本机配置；飞书通过官方流程创建专属应用并授权。配置、权限边界与端到端测试见 [日历说明](docs/calendar.md)。

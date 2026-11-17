@@ -46,7 +46,19 @@ export interface PreviewResult {
   launch: string
 }
 
+export interface CalendarStatus {
+  configured: boolean; connected: boolean; pending: boolean; mode: 'auto'; provider?: string; label?: string; coverage?: string
+  needsReconnect?: boolean; phase?: string; authorizationUrl?: string
+  googleConfigured: boolean
+  providers: { id: string; available: boolean }[]
+}
+
 export const api = {
+  calendar: (id: string) => get<CalendarStatus>(`/api/agents/${encodeURIComponent(id)}/calendar`),
+  importGoogleClient: (id: string, document: unknown) => post<{ saved: boolean }>(`/api/agents/${encodeURIComponent(id)}/calendar/google-client`, { document }),
+  connectCalendar: (id: string, provider: string) => post<{ authorizationUrl: string }>(`/api/agents/${encodeURIComponent(id)}/calendar/connect`, { provider }),
+  pollCalendar: (id: string) => post<{ status: string; phase?: string; authorizationUrl?: string; error?: string }>(`/api/agents/${encodeURIComponent(id)}/calendar/poll`),
+  disconnectCalendar: (id: string) => post<{ disconnected: boolean }>(`/api/agents/${encodeURIComponent(id)}/calendar`, undefined, 'DELETE'),
   session: localSession,
   publication: (id: string) => get<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/status`),
   setPublication: (id: string, config: { enabled: boolean; provider: 'default' | 'custom'; host: string; contactId?: string }) => post<PublicationStatus>(`/api/agents/${encodeURIComponent(id)}/publication/config`, config, 'PUT'),

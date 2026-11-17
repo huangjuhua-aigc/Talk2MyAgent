@@ -74,6 +74,12 @@ main { min-width: 0; }
 .section-number { display: inline-grid; place-items: center; width: 26px; height: 26px; color: var(--accent); background: var(--accent-soft); border-radius: 8px; font-size: 12px; margin-right: 8px; }
 .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .row > .grow { min-width: 0; }
+.google-calendar-setup { margin: 16px 0 22px; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); overflow-wrap: anywhere; }
+.google-calendar-setup p { margin: 8px 0 16px; }
+.google-calendar-setup ol { padding-left: 22px; margin: 16px 0 22px; }
+.google-calendar-setup li + li { margin-top: 12px; }
+.google-calendar-setup label { display: block; margin-bottom: 8px; font-weight: 600; }
+.google-calendar-setup input[type='file'] { margin-bottom: 10px; }
 .grow { flex: 1; }
 label.field { display: block; min-width: 0; margin: 20px 0; }
 label.field > span:first-child { display: block; color: #3b4a62; font-size: 13px; line-height: 21px; font-weight: 600; margin-bottom: 8px; }

@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { launchCommand } from './files.ts'
 import { agentPidPath, dshHome, hostHome } from './paths.ts'
 import { dshCommand } from './dsh-command.ts'
+import { DshLog } from './dsh-log.ts'
 
 /** Kill one PID and its children; the tree matters on Windows. */
 async function killTree(pid: number): Promise<void> {
@@ -67,8 +68,11 @@ class LogRing {
 export class DshRunner {
   private child: ChildProcess | undefined
   private readonly logs = new LogRing()
+  private readonly fileLog: DshLog
 
-  constructor(private readonly agentId: string) {}
+  constructor(private readonly agentId: string) {
+    this.fileLog = new DshLog(join(hostHome(), 'logs', `${agentId}.log`))
+  }
 
   /** The address this agent was last started on; internal calls must use it
    *  (a concretely-bound server is NOT reachable over loopback). */
@@ -116,6 +120,7 @@ export class DshRunner {
     mkdirSync(logDir, { recursive: true, mode: 0o700 })
     const logPath = join(logDir, `${this.agentId}.log`)
     const logFd = openSync(logPath, 'a', 0o600)
+    this.fileLog.begin()
     this.logs.push(`启动日志：${logPath}`)
     let child: ChildProcess
     try { child = spawn(invocation.command, invocation.args, {
@@ -175,8 +180,12 @@ export class DshRunner {
   }
 
   /** Recent log lines for the UI. */
-  tail(count?: number): string[] {
-    return this.logs.tail(count)
+  tail(count = 80): string[] {
+    return [...this.logs.tail(count), ...this.fileLog.lines(count)].slice(-count)
+  }
+
+  startupError(): string | undefined {
+    return this.fileLog.failure()
   }
 }
 

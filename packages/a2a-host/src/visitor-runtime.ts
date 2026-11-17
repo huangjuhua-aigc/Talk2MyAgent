@@ -8,7 +8,7 @@ import { installPlugin } from './dsh.ts'
 import type { StartupProgress } from './types.ts'
 
 /** Override only for local development until the matching plugin is published. */
-export const visitorPluginSource = (): string => process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.4.1'
+export const visitorPluginSource = (): string => process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.5.0'
 
 export function sandboxSupport(platform = process.platform, architecture = process.arch): { supported: boolean; reason?: string } {
   if (platform === 'darwin' && architecture !== 'arm64') return { supported: false, reason: '需要 Apple Silicon 和 ARM64 版 Node.js，暂不支持 Intel Mac' }
@@ -16,15 +16,20 @@ export function sandboxSupport(platform = process.platform, architecture = proce
   return { supported: true }
 }
 
-async function installedRuntime(profile: string): Promise<string | undefined> {
+async function installedRuntime(profile: string, calendar = false): Promise<string | undefined> {
   try {
     const manifest = createRequire(join(dshHome(), 'profiles', profile, 'package.json')).resolve('dsh-a2a-server/package.json')
     const version = JSON.parse(await readFile(manifest, 'utf8')).version as string
     const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version)
-    if (!match || Number(match[1]) === 0 && (Number(match[2]) < 4 || Number(match[2]) === 4 && Number(match[3]) < 1)) return undefined
+    if (!match || Number(match[1]) === 0 && Number(match[2]) < 5) return undefined
     const runtime = join(dirname(manifest), 'lib', 'microsandbox-runtime.js')
     await access(join(dirname(manifest), 'lib', 'public-visitors.js'))
     await access(join(dirname(manifest), 'lib', 'live-visitors.js'))
+    if (calendar) {
+      await access(join(dirname(manifest), 'lib', 'calendar.js'))
+      await access(join(dirname(manifest), 'calendar', 'auth.mjs'))
+      await access(join(dirname(manifest), 'calendar', 'google-client.mjs'))
+    }
     await access(runtime)
     return runtime
   } catch { return undefined }
@@ -32,18 +37,20 @@ async function installedRuntime(profile: string): Promise<string | undefined> {
 
 /** Upgrade a fresh/old profile and prepare the pinned local runtime automatically. */
 export async function requireVisitorRuntime(profile: string, options: {
+  prepareSandbox?: boolean
+  calendar?: boolean
   publicVisitors?: boolean
   onProgress?: (progress: StartupProgress) => void
   install?: typeof installPlugin
 } = {}): Promise<void> {
   if (!/^[A-Za-z0-9_-]+$/.test(profile)) throw new Error('Invalid profile')
   const execution = visitorExecution()
-  if (execution === 'microsandbox') {
+  if (options.prepareSandbox !== false && execution === 'microsandbox') {
     const support = sandboxSupport()
     if (!support.supported) throw new Error(support.reason)
   }
   options.onProgress?.({ phase: 'checking', message: '正在检查访客插件…' })
-  let file = await installedRuntime(profile)
+  let file = await installedRuntime(profile, options.calendar)
   if (!file) {
     options.onProgress?.({ phase: 'installing', message: '正在自动更新 Agent 的沙箱插件…' })
     const source = visitorPluginSource()
@@ -55,12 +62,27 @@ export async function requireVisitorRuntime(profile: string, options: {
       }
       throw new Error(`沙箱插件安装失败。\n${detail}`)
     }
-    file = await installedRuntime(profile)
-    if (!file) throw new Error('当前插件不支持完整访客管理，需要 dsh-a2a-server 0.4.1 或更高版本')
+    file = await installedRuntime(profile, options.calendar)
+    if (!file) throw new Error(options.calendar
+      ? '安装源中的插件尚不支持日历预约，请安装支持日历的插件版本后启动（开发环境可设置 A2A_PLUGIN_SOURCE）'
+      : '当前插件不支持完整访客管理，需要 dsh-a2a-server 0.5.0 或更高版本')
   }
-  if (execution === 'read-only') return
+  if (options.prepareSandbox === false || execution === 'read-only') return
   const url = pathToFileURL(file)
   url.searchParams.set('version', String((await stat(file)).mtimeMs))
   const runtime = await import(url.href) as { prepareMicrosandbox: (options: { onProgress?: (progress: StartupProgress) => void }) => Promise<unknown> }
   await runtime.prepareMicrosandbox(options.onProgress ? { onProgress: options.onProgress } : {})
+}
+
+/** Calendar authorization can install its library without starting an Agent or a sandbox. */
+export async function calendarModule(profile: string, install = true): Promise<string> {
+  const source = process.env['A2A_PLUGIN_SOURCE']
+  if (source) {
+    const local = join(source, 'calendar', 'index.mjs')
+    try { await access(local); return local } catch { /* a package spec is installed below */ }
+  }
+  if (install) await requireVisitorRuntime(profile, { calendar: true, prepareSandbox: false })
+  const runtime = await installedRuntime(profile, true)
+  if (!runtime) throw new Error('当前插件尚不支持本地日历，请更新插件')
+  return join(dirname(dirname(runtime)), 'calendar', 'index.mjs')
 }

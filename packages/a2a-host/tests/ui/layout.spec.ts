@@ -11,7 +11,11 @@ async function expectComfortableInput(input: Locator): Promise<void> {
   const size = await input.boundingBox()
   expect(size?.height).toBeGreaterThanOrEqual(48)
   expect(size?.width).toBeGreaterThan(200)
-  expect(await input.evaluate(element => element.clientWidth / element.parentElement!.clientWidth)).toBeGreaterThan(.95)
+  expect(await input.evaluate(element => {
+    const parent = element.parentElement!, style = getComputedStyle(parent)
+    const available = parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    return element.getBoundingClientRect().width / available
+  })).toBeGreaterThan(.95)
 }
 
 for (const width of [1280, 820, 390]) {
