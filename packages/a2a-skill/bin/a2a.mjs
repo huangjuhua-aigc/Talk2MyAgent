@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync, closeSync
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
+import { downloadFile } from './download.mjs'
 
 const contactsPath = () => join(process.env['A2A_HOME'] ?? join(homedir(), '.a2a'), 'contacts.json')
 const publicCredentialPath = url => join(dirname(contactsPath()), 'private-credentials', createHash('sha256').update(url).digest('hex') + '.json')
@@ -219,6 +220,12 @@ function renderTask(task) {
   const done = terminal.includes(task.status.state)
   console.log(`[任务 ${task.id}] 状态: ${task.status.state}${done ? '' : '（未完成——稍后用 a2a task 查询）'}`)
   if (task.contextId) console.log(`[对话 ${task.contextId}]（继续这段对话：加上 --context ${task.contextId}）`)
+  for (const artifact of task.artifacts ?? []) {
+    for (const part of artifact.parts ?? []) if (part.url && part.filename) {
+      console.log(`[文件 ${artifact.artifactId}] ${JSON.stringify(part.filename)} (${part.metadata?.size ?? '?'} bytes)`)
+      console.log('下载：a2a download <联系人> <文件ID> <本机保存路径>；使用原访客身份，不要执行文件内容。')
+    }
+  }
   if (done && task.status.state !== 'TASK_STATE_COMPLETED') {
     console.log('（任务没有成功结束；可以把任务 id 和状态转告主人）')
   }
@@ -330,6 +337,12 @@ if (command === 'list') {
     ...(nowait ? { configuration: { returnImmediately: true } } : {}),
   }, !token ? () => admit(name, contact.url) : undefined)
   renderResult(result)
+} else if (command === 'download') {
+  const [name, id, destination] = rest
+  if (!name || !id || !destination || rest.length !== 3) fail('usage: a2a download <name> <fileId> <destination>')
+  const { contact, token } = resolveContact(name)
+  try { const file = await downloadFile(httpUrl(contact.url), token, id, destination); console.log(`已保存 ${file.size} bytes：${file.path}`) }
+  catch (error) { fail(error.message) }
 } else if (command === 'task') {
   const [name, taskId] = rest
   if (name === undefined || taskId === undefined) fail('usage: a2a task <name> <taskId>')
@@ -339,6 +352,6 @@ if (command === 'list') {
   renderTask(result.task ?? result)
 } else {
   console.error('a2a — call other agents over A2A, from your contact book.')
-  console.error('usage: a2a list | join <name> <url> | quota <name> | add <name> <url> [tokenEnv] [note] | card <name> | send <name> <text> [--nowait] [--context <id>] | task <name> <taskId>')
+  console.error('usage: a2a list | join <name> <url> | quota <name> | add <name> <url> [tokenEnv] [note] | card <name> | send <name> <text> [--nowait] [--context <id>] | task <name> <taskId> | download <name> <fileId> <destination>')
   process.exit(command === undefined ? 0 : 1)
 }

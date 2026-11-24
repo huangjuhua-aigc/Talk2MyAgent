@@ -14,12 +14,15 @@ test('first start upgrades the plugin automatically, forwards progress, caches i
   const install = async (profile: string, source: string) => {
     installs++
     assert.equal(profile, 'fixture')
-    assert.equal(source, process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.5.0')
+    assert.equal(source, process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.6.0')
     const directory = join(root, 'profiles/fixture/node_modules/dsh-a2a-server')
     await mkdir(join(directory, 'lib'), { recursive: true })
-    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dsh-a2a-server', version: '0.5.0', type: 'module' }))
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dsh-a2a-server', version: '0.6.0', type: 'module' }))
     await writeFile(join(directory, 'lib/public-visitors.js'), 'export {}')
     await writeFile(join(directory, 'lib/live-visitors.js'), 'export {}')
+    for (const file of ['visitor-present.js', 'present-files.js', 'present-worker.py']) {
+      await writeFile(join(directory, 'lib', file), '')
+    }
     await writeFile(join(directory, 'lib/microsandbox-runtime.js'), `export async function prepareMicrosandbox({onProgress}) {
       onProgress?.({phase:'image',message:'fixture image download'});
       onProgress?.({phase:'ready',message:'fixture ready'});
@@ -51,16 +54,22 @@ test('first start upgrades the plugin automatically, forwards progress, caches i
     assert.deepEqual(events.map(e => e.phase), ['checking','installing','image','ready'])
     await requireVisitorRuntime('fixture', { install })
     assert.equal(installs, 1, 'cached runtime must not reinstall')
-    await writeFile(join(root, 'profiles/fixture/node_modules/dsh-a2a-server/package.json'), JSON.stringify({ name: 'dsh-a2a-server', version: '0.4.1', type: 'module' }))
-    await requireVisitorRuntime('fixture', { publicVisitors: false, install })
-    assert.equal(installs, 2, '0.4.1 profiles upgrade even with public access disabled, for public hardlink copies and calendar support')
+    for (const version of ['0.4.1', '0.5.0']) {
+      const before: number = installs
+      await writeFile(join(root, 'profiles/fixture/node_modules/dsh-a2a-server/package.json'), JSON.stringify({ name: 'dsh-a2a-server', version, type: 'module' }))
+      await requireVisitorRuntime('fixture', { publicVisitors: false, install })
+      assert.equal(installs, before + 1, `${version} profiles upgrade even with public access disabled`)
+    }
     await requireVisitorRuntime('fixture', { publicVisitors: true, install })
-    assert.equal(installs, 2, 'full visitor runtime is cached')
-    await rm(join(root, 'profiles/fixture/node_modules/dsh-a2a-server/lib/live-visitors.js'))
-    await requireVisitorRuntime('fixture', { install })
-    assert.equal(installs, 3, 'incomplete or stale development builds are repaired')
+    assert.equal(installs, 3, 'full visitor runtime is cached')
+    for (const file of ['live-visitors.js', 'visitor-present.js', 'present-files.js', 'present-worker.py']) {
+      const before: number = installs
+      await rm(join(root, 'profiles/fixture/node_modules/dsh-a2a-server/lib', file))
+      await requireVisitorRuntime('fixture', { install })
+      assert.equal(installs, before + 1, `missing ${file} is repaired`)
+    }
     await assert.rejects(requireVisitorRuntime('fixture', { calendar: true, install }), /尚不支持日历预约/)
-    assert.equal(installs, 4, 'calendar authorization checks the calendar feature, not just the version')
+    assert.equal(installs, 8, 'calendar authorization checks the calendar feature, not just the version')
     await requireVisitorRuntime('fixture', { calendar: true, install: async (profile, source) => {
       const result = await install(profile, source)
       await writeFile(join(root, 'profiles/fixture/node_modules/dsh-a2a-server/lib/calendar.js'), 'export {}')
@@ -70,7 +79,7 @@ test('first start upgrades the plugin automatically, forwards progress, caches i
       return result
     } })
     await requireVisitorRuntime('fixture', { calendar: true, install })
-    assert.equal(installs, 5, 'calendar-capable builds are cached')
+    assert.equal(installs, 9, 'calendar-capable builds are cached')
     assert.equal(sandboxSupport('darwin','arm64').supported, true)
     assert.equal(sandboxSupport('darwin','x64').supported, false)
     assert.equal(sandboxSupport('win32','x64').supported, true)
@@ -100,8 +109,9 @@ test('read-only startup upgrades the visitor plugin without loading Microsandbox
   await writeVersion('0.4.1')
   await writeFile(join(directory, 'lib/microsandbox-runtime.js'), "throw new Error('VM module loaded in read-only mode')")
   const install = t.mock.fn(async () => {
-    await writeVersion('0.5.0')
+    await writeVersion('0.6.0')
     for (const name of ['public-visitors', 'live-visitors']) await writeFile(join(directory, 'lib', name + '.js'), 'export {}')
+    for (const file of ['visitor-present.js', 'present-files.js', 'present-worker.py']) await writeFile(join(directory, 'lib', file), '')
     return { ok: true, output: '' }
   })
   await assert.rejects(requireVisitorRuntime('fixture', { install: async () => ({ ok: false, output: 'fixture offline' }) }), /fixture offline/)

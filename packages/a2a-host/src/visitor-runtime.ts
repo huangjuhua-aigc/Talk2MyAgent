@@ -8,7 +8,7 @@ import { installPlugin } from './dsh.ts'
 import type { StartupProgress } from './types.ts'
 
 /** Override only for local development until the matching plugin is published. */
-export const visitorPluginSource = (): string => process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.5.0'
+export const visitorPluginSource = (): string => process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.6.0'
 
 export function sandboxSupport(platform = process.platform, architecture = process.arch): { supported: boolean; reason?: string } {
   if (platform === 'darwin' && architecture !== 'arm64') return { supported: false, reason: '需要 Apple Silicon 和 ARM64 版 Node.js，暂不支持 Intel Mac' }
@@ -21,10 +21,13 @@ async function installedRuntime(profile: string, calendar = false): Promise<stri
     const manifest = createRequire(join(dshHome(), 'profiles', profile, 'package.json')).resolve('dsh-a2a-server/package.json')
     const version = JSON.parse(await readFile(manifest, 'utf8')).version as string
     const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version)
-    if (!match || Number(match[1]) === 0 && Number(match[2]) < 5) return undefined
+    if (!match || Number(match[1]) === 0 && Number(match[2]) < 6) return undefined
     const runtime = join(dirname(manifest), 'lib', 'microsandbox-runtime.js')
     await access(join(dirname(manifest), 'lib', 'public-visitors.js'))
     await access(join(dirname(manifest), 'lib', 'live-visitors.js'))
+    for (const file of ['visitor-present.js', 'present-files.js', 'present-worker.py']) {
+      await access(join(dirname(manifest), 'lib', file))
+    }
     if (calendar) {
       await access(join(dirname(manifest), 'lib', 'calendar.js'))
       await access(join(dirname(manifest), 'calendar', 'auth.mjs'))
@@ -65,7 +68,7 @@ export async function requireVisitorRuntime(profile: string, options: {
     file = await installedRuntime(profile, options.calendar)
     if (!file) throw new Error(options.calendar
       ? '安装源中的插件尚不支持日历预约，请安装支持日历的插件版本后启动（开发环境可设置 A2A_PLUGIN_SOURCE）'
-      : '当前插件不支持完整访客管理，需要 dsh-a2a-server 0.5.0 或更高版本')
+      : '当前插件不支持完整访客管理和文件交付，需要 dsh-a2a-server 0.6.0 或更高版本')
   }
   if (options.prepareSandbox === false || execution === 'read-only') return
   const url = pathToFileURL(file)

@@ -1,5 +1,10 @@
 # A2A calling skill
 
+## File delivery — 2026-11-24
+
+- Display delivered file IDs and add `download <contact> <fileId> <destination>`. Reuse the contact's authenticated identity and configured endpoint; reject redirects, verify size and SHA-256 through bounded Range requests, and never overwrite local files. Requires plugin 0.6.0 and the file-capable Relay/Connector.
+- 新增文件下载命令，按原访客身份下载，校验完整性并保护本地已有文件；不向模型给出的任意 URL 发送凭据，不为下载自动创建新访客身份。
+
 ## 0.3.0 — 2026-11-05
 
 - Unify invited and anonymous access through `add`/`send`; tokenEnv is optional. Only a correlated pre-execution challenge permits registration and one continuation with the original messageId. Persist credentials before continuation, reuse identities across processes/aliases, and never register a replacement after invalid credentials, network failures or quota exhaustion. `join` remains available manually and `quota` checks the allowance. Requires server 0.4.1.

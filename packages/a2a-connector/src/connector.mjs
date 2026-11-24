@@ -196,15 +196,16 @@ export class Connector {
         const m = decodeFrame(raw)
         if (m.type === 'hello' && !session) {
           session = { connectionId: m.connectionId, generation: m.generation }
-          void wire(ws, session, { type: 'ready' }).catch(() => ws.terminate()); return
+          void wire(ws, session, { type: 'ready', files: 1 }).catch(() => ws.terminate()); return
         }
         if (!session || !sameSession(m, session)) throw new Error('Session mismatch')
         if (m.type === 'ready_ack' && !online) { online = true; this.attempt = 0; this.heals = { endpoint: 0, identity: 0 }; this.status('online'); return }
         if (!online) throw new Error('Not ready')
         if (m.type === 'request_begin') {
-          if (this.flows.has(m.requestId) || this.flows.size >= LIMIT.concurrent || !['card','rpc'].includes(m.route) ||
-              !Number.isInteger(m.length) || m.length < 0 || m.length > LIMIT.body || m.route === 'card' && m.length) throw new Error('Invalid request')
-          const f = { id: m.requestId, route: m.route, headers: headersOf(m.headers), length: m.length, received: 0, seq: 0, chunks: [],
+          if (this.flows.has(m.requestId) || this.flows.size >= LIMIT.concurrent || !['card','rpc','file'].includes(m.route) ||
+              !Number.isInteger(m.length) || m.length < 0 || m.length > LIMIT.body || m.route !== 'rpc' && m.length ||
+              m.route === 'file' && (!/^[a-f0-9-]{36}$/.test(m.fileId ?? '') || !['GET','HEAD'].includes(m.method))) throw new Error('Invalid request')
+          const f = { id: m.requestId, route: m.route, fileId:m.fileId, method:m.method, headers: headersOf(m.headers), length: m.length, received: 0, seq: 0, chunks: [],
             sent: 0, consumed: 0, responseSeq: 0, controller: new AbortController(), ended: false }
           f.timer = setTimeout(() => { this.abort(f); this.flows.delete(f.id); void wire(ws, session, { type: 'abort', requestId: f.id }).catch(() => {}) }, LIMIT.total)
           this.flows.set(f.id, f); return
@@ -236,8 +237,9 @@ export class Connector {
     const body = Buffer.concat(f.chunks); f.chunks = []
     let extended = false
     if (f.route === 'rpc') { try { extended = JSON.parse(body.toString()).method === 'GetExtendedAgentCard' } catch {} }
-    const res = await upstream(f.route === 'card' ? this.config.localCardUrl : this.config.localRpcUrl, {
-      method: f.route === 'card' ? 'GET' : 'POST', headers: f.headers, ...(f.route === 'rpc' ? { body } : {}), signal: f.controller.signal })
+    const target = f.route === 'file' ? `${this.config.localRpcUrl.replace(/\/$/, '')}/files/${f.fileId}` : f.route === 'card' ? this.config.localCardUrl : this.config.localRpcUrl
+    const res = await upstream(target, {
+      method: f.route === 'file' ? f.method : f.route === 'card' ? 'GET' : 'POST', headers: f.headers, ...(f.route === 'rpc' ? { body } : {}), signal: f.controller.signal })
     let stream = res
     const headers = headersOf(res.headers, true)
     if (res.statusCode >= 200 && res.statusCode < 300 && (f.route === 'card' || extended)) {
@@ -245,6 +247,7 @@ export class Connector {
       if (f.route === 'card') stream = [Buffer.from(JSON.stringify(adaptCard(data, this.registration.info.publicRpcUrl)))]
       else { if (data.result) data.result = adaptCard(data.result, this.registration.info.publicRpcUrl); stream = [Buffer.from(JSON.stringify(data))] }
       headers['content-type'] = 'application/json'
+      delete headers['content-length'] // Card URL rewriting changes the byte count.
     }
     await wire(ws, session, { type: 'response_begin', requestId: f.id, status: res.statusCode, headers })
     for await (const chunk of stream) {

@@ -26,7 +26,7 @@ export function bytesOf(m) {
 }
 export function headersOf(input, response = false) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Buffer.byteLength(JSON.stringify(input)) > LIMIT.headers) throw new Error('Invalid headers')
-  const allowed = response ? ['content-type','cache-control','www-authenticate','retry-after','a2a-version'] : ['authorization','content-type','accept','a2a-version']
+  const allowed = response ? ['content-type','cache-control','www-authenticate','retry-after','a2a-version','content-length','content-disposition','etag','accept-ranges','content-range','x-content-type-options','content-security-policy'] : ['authorization','content-type','accept','a2a-version','range','if-range']
   const out = {}
   for (const k of allowed) {
     const v = input[k]

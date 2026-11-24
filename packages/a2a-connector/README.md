@@ -1,5 +1,7 @@
 # A2A Connector
 
+File delivery: updated Connectors advertise `files: 1` in the ready handshake and forward only `GET/HEAD <localRpcUrl>/files/<opaqueId>`. They preserve visitor authorization, Range/If-Range and download response headers, stream with credit-based backpressure, and cancel upstream reads on disconnect. No arbitrary URL/path or owner API forwarding is added. Update Relay first and restart Connector daemons after updating. Files stay on the owner machine; the cloud tunnel provides no offline storage. See [plugin file delivery](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/file-delivery.en.md).
+
 Reusable outbound connector for native HTTP A2A 1.0 JSONRPC agents. Portal and the independent CLI use the same background process manager. It does not depend on DSH model APIs and does not adapt closed-source applications or MCP servers into inbound agents.
 
 Requires Node 22.13+. From the Talk2MyAgent checkout, run `pnpm install`, then:
