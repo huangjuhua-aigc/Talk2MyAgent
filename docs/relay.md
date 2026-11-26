@@ -26,7 +26,7 @@ Portal 不再本地生成号码，只使用当前 Relay 返回并由 Connector �
 
 通过 Portal/CLI 停止 Agent 时，会先经本机管理接口取消未完成任务、停止访客沙箱并保留其磁盘，收到确认后再结束后端进程。若无法确认，保留进程并报错，避免强制结束导致近期生成的文件丢失。关闭公网发布只断开中继，不执行这个停止流程。
 
-Portal 内置默认入口 **https://relay.creez.cn**，直接选择“默认 Relay”即可使用。维护者可通过环境变量 `A2A_RELAY_DEFAULT_HOST=https://实际域名` 覆盖默认入口；显式设置为空字符串会禁用默认入口。用户仍可选择“自定义 Relay host”连接自建中继。切换 host 前关闭当前发布，每个 host 独立保存设备身份和地址，已有自定义 host 不会被改写。
+Portal 内置默认入口 **https://relay.huangjuhua.cn**，直接选择“默认 Relay”即可使用。维护者可通过环境变量 `A2A_RELAY_DEFAULT_HOST=https://实际域名` 覆盖默认入口；显式设置为空字符串会禁用默认入口。用户仍可选择“自定义 Relay host”连接自建中继。切换 host 前关闭当前发布，每个 host 独立保存设备身份和地址，已有自定义 host 不会被改写。
 
 Relay 的端口写在服务地址中，例如本地联调的 `http://127.0.0.1:8787`，或使用自定义 HTTPS 端口的 `https://relay.example.com:8443`。向导只提供“公网中继”和“局域网”，不再提供独立的高级端口或自定义直连地址表单。局域网地址直接写成 `192.168.1.10:3080`；中继模式沿用本地监听配置，默认端口 `3080`。Portal 启动前会检查端口冲突。Relay `/health` 正常只代表中继服务运行，需本地 Agent 与 Connector 上线后才能接待访客。`127.0.0.1` 仅用于本机联调，不能供另一台设备访问。
 
@@ -60,11 +60,11 @@ pnpm --filter @talk2myagent/a2a-host start publication AGENT_ID
 pnpm --filter @talk2myagent/a2a-host start unpublish AGENT_ID
 ```
 
-前一个 `start` 是 pnpm 脚本名，后一个是 host CLI 子命令。`publish AGENT_ID` 可在 Agent 启动前调用：先注册地址并保存自动发布设置；之后 `start AGENT_ID` 自动上线。默认 Relay host 为 `https://relay.creez.cn`，可通过 `A2A_RELAY_DEFAULT_HOST` 覆盖；自定义 host 在 Portal 保存。独立 Connector 可显式指定本地 RPC/Card URL，参见 [Connector CLI](../packages/a2a-connector/README.md)。
+前一个 `start` 是 pnpm 脚本名，后一个是 host CLI 子命令。`publish AGENT_ID` 可在 Agent 启动前调用：先注册地址并保存自动发布设置；之后 `start AGENT_ID` 自动上线。默认 Relay host 为 `https://relay.huangjuhua.cn`，可通过 `A2A_RELAY_DEFAULT_HOST` 覆盖；自定义 host 在 Portal 保存。独立 Connector 可显式指定本地 RPC/Card URL，参见 [Connector CLI](../packages/a2a-connector/README.md)。
 
 ## 本地开发版安装
 
-Portal 默认安装 npm 插件 `^0.6.0`，正常启动无需设置开发变量。DSH `0.2.1-rc.2` 已满足兼容要求。以下步骤仅用于测试本地尚未发布的修改。
+Portal 默认安装 npm 插件 `^0.6.1`，正常启动无需设置开发变量。DSH `0.2.1-rc.2` 已满足兼容要求。以下步骤仅用于测试本地尚未发布的修改。
 
 先在 dsh-a2a 插件仓库构建并打包，再为 Portal 指定安装包（PowerShell 示例）：
 
@@ -73,7 +73,7 @@ cd D:\code\dsh-a2a
 pnpm build
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.a2a\packages" | Out-Null
 npm pack --pack-destination "$env:USERPROFILE\.a2a\packages"
-$env:A2A_PLUGIN_SOURCE = "$env:USERPROFILE\.a2a\packages\dsh-a2a-server-0.6.0.tgz"
+$env:A2A_PLUGIN_SOURCE = "$env:USERPROFILE\.a2a\packages\dsh-a2a-server-0.6.1.tgz"
 pnpm --dir D:\code\Talk2MyAgent\packages\a2a-host start
 ```
 
@@ -92,3 +92,7 @@ pnpm --filter @talk2myagent/a2a-skill test
 ```
 
 UI 测试使用真实 Portal、Relay、后台 Connector 和调用技能，A2A 模型回复由测试服务提供。dsh-a2a 仓库另有实际 DSH 协议与 harness 的中继集成测试，模型使用确定性适配器。测试不读取用户工作资料，也不消耗付费模型额度。
+
+### 默认服务迁移（2026-11-26）
+
+默认服务由 `https://relay.creez.cn` 切换为 `https://relay.huangjuhua.cn`。这是独立的新 Relay，不迁移旧服务的编号或设备密钥。使用默认服务的 Agent 需在新服务重新获取中继地址，并重新复制邀请。若要继续使用旧服务，先关闭发布，再选择“自定义 Relay host”并填写旧地址；原有显式自定义 host 不受影响。各 host 的注册信息独立保存，不能混用。

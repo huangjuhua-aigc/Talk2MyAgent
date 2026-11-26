@@ -28,19 +28,19 @@ The **＋ 添加访客** button below the invitation controls adds a named visit
 
 Portal/CLI stop first uses authenticated local IPC to drain tasks and stop guest sandboxes while retaining their disks, then terminates the backend only after acknowledgement. A missing acknowledgement leaves the process intact and reports an error. Closing publication only disconnects the Relay and does not stop the Agent.
 
-Portal includes **https://relay.creez.cn** as its default Relay. Operators can override it with `A2A_RELAY_DEFAULT_HOST`; explicitly setting an empty string disables the default. Users can still select a custom Relay host, and existing custom hosts are preserved. Close publication before changing hosts. Each host gets a separate device identity. Older running agents must be stopped and started once through the updated Portal to record their applied configuration. Changed visitor credentials/workspaces require a restart to take effect; invitations can be prepared beforehand with an explicit pending-activation notice.
+Portal includes **https://relay.huangjuhua.cn** as its default Relay. Operators can override it with `A2A_RELAY_DEFAULT_HOST`; explicitly setting an empty string disables the default. Users can still select a custom Relay host, and existing custom hosts are preserved. Close publication before changing hosts. Each host gets a separate device identity. Older running agents must be stopped and started once through the updated Portal to record their applied configuration. Changed visitor credentials/workspaces require a restart to take effect; invitations can be prepared beforehand with an explicit pending-activation notice.
 
 Closing Portal leaves the Connector running. Closing publication stops forwarding without stopping the local agent or canceling accepted tasks, and preserves its URL. Network failures reconnect to the same identity, but in-flight requests are never replayed. Invitations need a registered URL for the selected Relay; offline invitations carry an explicit notice. A small private control process remains after stopping publication; the standalone CLI's `shutdown` exits it. There is no OS boot service; relaunch Portal/CLI and the local agent after reboot.
 
 Private credentials live under `~/.a2a/relay/<agentId>` and cannot overlap any visitor workspace. Portal's management port is never forwarded. TLS terminates at the Relay/proxy, whose operator can see content and visitor credentials; choose a trusted or self-hosted service. The existing scoped file-reading and public briefing features are unchanged.
 
-For headless use, run `pnpm --filter @talk2myagent/a2a-host start publish AGENT_ID`, `publication AGENT_ID` or `unpublish AGENT_ID`. `publish` can reserve a URL before startup and save the auto-publication setting; a later `start AGENT_ID` connects automatically. The default host is `https://relay.creez.cn`; override it with `A2A_RELAY_DEFAULT_HOST` or save a custom host in Portal. See [Connector CLI](../packages/a2a-connector/README.md) for publishing another compatible native HTTP A2A agent.
+For headless use, run `pnpm --filter @talk2myagent/a2a-host start publish AGENT_ID`, `publication AGENT_ID` or `unpublish AGENT_ID`. `publish` can reserve a URL before startup and save the auto-publication setting; a later `start AGENT_ID` connects automatically. The default host is `https://relay.huangjuhua.cn`; override it with `A2A_RELAY_DEFAULT_HOST` or save a custom host in Portal. See [Connector CLI](../packages/a2a-connector/README.md) for publishing another compatible native HTTP A2A agent.
 
 Set `A2A_RELAY_SOURCE` to an installed independent Relay checkout, then run Connector's `test:integration` and host's `test:all`. Tests use temporary homes, real HTTP/WS, the background process and headless browser automation. Deterministic replies avoid paid-model calls. A separate dsh-a2a integration test exercises the real harness and A2A protocol through the Relay. Production DNS, TLS proxy and cross-network reachability require deployment acceptance testing.
 
 ## Local development installation
 
-Portal installs npm plugin `^0.6.0` by default; normal startup does not need a development override. DSH `0.2.1-rc.2` meets the compatibility requirement. Use the following steps only to test local unpublished changes.
+Portal installs npm plugin `^0.6.1` by default; normal startup does not need a development override. DSH `0.2.1-rc.2` meets the compatibility requirement. Use the following steps only to test local unpublished changes.
 
 Build and pack in the dsh-a2a checkout, then set the package source before starting Portal (POSIX shell example):
 
@@ -49,7 +49,7 @@ cd /path/to/dsh-a2a
 pnpm build
 mkdir -p "$HOME/.a2a/packages"
 npm pack --pack-destination "$HOME/.a2a/packages"
-export A2A_PLUGIN_SOURCE="$HOME/.a2a/packages/dsh-a2a-server-0.6.0.tgz"
+export A2A_PLUGIN_SOURCE="$HOME/.a2a/packages/dsh-a2a-server-0.6.1.tgz"
 pnpm --dir /path/to/Talk2MyAgent/packages/a2a-host start
 ```
 
@@ -58,3 +58,7 @@ Restart an already running Portal to load the environment variable. Clicking the
 ## Self-heal and resetting the relay identity
 
 A relay 401 (unknown device credential, e.g. relay data loss) triggers one registration recovery attempt. A 409 caused by a stale local revision is re-synced once; a duplicate-number 409 is reported without choosing another number. A 403 (revoked/expired) still blocks. To reset by hand, turn publishing off and click “重置 Relay 身份”, or run `a2a-connector reset --state <dir>`; old addresses stop working and the chosen-number setting is cleared. The old number stays reserved, so a new identity must use a different available number.
+
+### Default service migration (2026-11-26)
+
+The built-in default changed from `https://relay.creez.cn` to `https://relay.huangjuhua.cn`. This is an independent Relay; old registrations and device keys are not migrated. Agents using the default must obtain a new address and copy a new invitation. To keep using the old service, turn publication off, select a custom Relay host and enter its old URL. Explicit custom hosts are unchanged, and registration credentials remain separate for each host.

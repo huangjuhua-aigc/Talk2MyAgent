@@ -8,7 +8,7 @@ import { installPlugin } from './dsh.ts'
 import type { StartupProgress } from './types.ts'
 
 /** Override only for local development until the matching plugin is published. */
-export const visitorPluginSource = (): string => process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.6.0'
+export const visitorPluginSource = (): string => process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.6.1'
 
 export function sandboxSupport(platform = process.platform, architecture = process.arch): { supported: boolean; reason?: string } {
   if (platform === 'darwin' && architecture !== 'arm64') return { supported: false, reason: '需要 Apple Silicon 和 ARM64 版 Node.js，暂不支持 Intel Mac' }

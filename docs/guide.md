@@ -109,7 +109,7 @@ pnpm --filter @talk2myagent/a2a-host start monitor my-agent
 
 获准访客默认可以通过 `read_file` 读取指定 `workspaceRoot` 中的 UTF-8 文本和目录列表；单文件上限 2 MiB。路径经过真实路径校验，拒绝越界、符号链接/junction、硬链接和 Windows ADS，并排除插件自身状态目录。写入、命令、联网和跨会话工具不向访客开放。
 
-Portal 使用插件 0.6.0 的 Microsandbox。点击启动后自动检查/更新插件、下载沙箱组件和固定镜像并显示进度，无需手动安装 Docker。每位访客首次工具调用创建独立 VM，公共资料副本只读、私有磁盘可读写；聊天记录和凭据不挂载。空闲 30 秒暂停、10 分钟停止，私有文件保留。每个后端最多 4 个驻留 VM。系统虚拟化功能若未启用，仍需用户开启并重启。详见[安装与迁移](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.md)。正常使用无需设置开发变量；仅测试源码改动时把 `A2A_PLUGIN_SOURCE` 设为已构建插件的绝对路径。
+Portal 使用插件 0.6.1 的 Microsandbox。点击启动后自动检查/更新插件、下载沙箱组件和固定镜像并显示进度，无需手动安装 Docker。每位访客首次工具调用创建独立 VM，公共资料副本只读、私有磁盘可读写；聊天记录和凭据不挂载。空闲 30 秒暂停、10 分钟停止，私有文件保留。每个后端最多 4 个驻留 VM。系统虚拟化功能若未启用，仍需用户开启并重启。详见[安装与迁移](https://github.com/huangjuhua-aigc/dsh-a2a/blob/main/docs/visitor-isolation.md)。正常使用无需设置开发变量；仅测试源码改动时把 `A2A_PLUGIN_SOURCE` 设为已构建插件的绝对路径。
 
 确需给不同访客指定不同目录时，核心支持 `config.isolation.peerWorkspaces`；目前在保存的 agent JSON 中设置后从 Portal 重启生效，向导没有逐访客目录选择器。未覆盖的访客继续使用默认资料目录。单纯改变 cwd 或 `read-only` 沙箱不等于操作系统级读取隔离。
 

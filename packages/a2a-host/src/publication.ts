@@ -16,7 +16,7 @@ import { isContactId } from './contact-id.ts'
 
 const safeId = (id: string): string => { if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('Invalid agent ID'); return id }
 export const publicationDir = (id: string): string => join(hostHome(), 'relay', safeId(id))
-export const defaultRelayHost = (): string => process.env['A2A_RELAY_DEFAULT_HOST'] ?? 'https://relay.creez.cn'
+export const defaultRelayHost = (): string => process.env['A2A_RELAY_DEFAULT_HOST'] ?? 'https://relay.huangjuhua.cn'
 export async function validateSharedRoots(config: WizardConfig): Promise<void> {
   if (config.network.mode === 'relay' && config.network.relay?.contactId !== undefined && !isContactId(config.network.relay.contactId)) throw new Error('请填写有效的 11 位手机号作为公开编号')
   const roots = [config.isolation.workspaceRoot, ...Object.values(config.isolation.peerWorkspaces)]

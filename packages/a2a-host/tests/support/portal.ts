@@ -18,7 +18,8 @@ export interface FixtureAgent {
   liveVisitorMode: 'supported' | 'unsupported' | 'unconfirmed'
 }
 
-export async function startPortal(agentCount = 2, options: { calendarFixture?: string; googleClientId?: string; relayOrigin?: string; publicA2A?: boolean; liveVisitors?: boolean; port?: number } = {}) {
+// null tests the built-in Relay default; undefined disables it to keep fixtures offline.
+export async function startPortal(agentCount = 2, options: { calendarFixture?: string; googleClientId?: string; relayOrigin?: string | null; publicA2A?: boolean; liveVisitors?: boolean; port?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'a2a-ui-'))
   const host = join(root, 'console')
   const agents: FixtureAgent[] = []
@@ -132,7 +133,7 @@ export async function startPortal(agentCount = 2, options: { calendarFixture?: s
       cwd: fileURLToPath(new URL('../..', import.meta.url)),
       env: { ...process.env, A2A_HOST_HOME: host, DSH_HOME: join(root, 'dsh'), A2A_HOST_PORT: String(options.port ?? 0),
         CALENDAR_FIXTURE_ORIGIN: options.calendarFixture ?? '', A2A_GOOGLE_CLIENT_ID: options.googleClientId ?? (options.calendarFixture ? 'test-google-app' : ''), A2A_GOOGLE_CLIENT_SECRET: '',
-        A2A_RELAY_DEFAULT_HOST: options.relayOrigin ?? '', A2A_RELAY_ALLOW_LOOPBACK_HTTP: options.relayOrigin ? '1' : '0' },
+        A2A_RELAY_DEFAULT_HOST: options.relayOrigin === null ? undefined : options.relayOrigin ?? '', A2A_RELAY_ALLOW_LOOPBACK_HTTP: options.relayOrigin ? '1' : '0' },
       stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     })
     const processUnderTest = child

@@ -14,7 +14,7 @@ test('first start upgrades the plugin automatically, forwards progress, caches i
   const install = async (profile: string, source: string) => {
     installs++
     assert.equal(profile, 'fixture')
-    assert.equal(source, process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.6.0')
+    assert.equal(source, process.env['A2A_PLUGIN_SOURCE'] || 'dsh-a2a-server@^0.6.1')
     const directory = join(root, 'profiles/fixture/node_modules/dsh-a2a-server')
     await mkdir(join(directory, 'lib'), { recursive: true })
     await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'dsh-a2a-server', version: '0.6.0', type: 'module' }))
